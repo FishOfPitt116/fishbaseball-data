@@ -1,0 +1,25 @@
+[project]
+name = "fishbaseball-data"
+version = "0.1.0"
+description = "Validated, versioned Parquet mirrors of baseball datasets, published as GitHub Release assets."
+requires-python = ">=3.10"
+license = "MIT"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests/unit"]
+markers = ["integration: hits the network (tests/integration)"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["pipelines", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
