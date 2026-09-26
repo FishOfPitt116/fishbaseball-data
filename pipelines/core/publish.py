@@ -86,7 +86,8 @@ def make_notice(config: SourceConfig, manifest: Mapping[str, Any]) -> str:
 def make_notes(config: SourceConfig, manifest: Mapping[str, Any]) -> str:
     up, ch = manifest["upstream"], manifest["changes"]
     lines = [
-        f"{config.name.capitalize()} {up['version']}, released {up['released']} (upstream).",
+        f"Built from upstream {config.name.capitalize()} database version {up['version']} "
+        f"(released {up['released']}).",
         f"Schema version {manifest['schema_version']}. Built {manifest['built_at']}.",
         "",
         "## Changes",

@@ -232,3 +232,8 @@ def test_release_and_pointer_titles_are_their_tags(ctx):
 def test_title_is_the_tag_even_after_a_previous_release(ctx):
     ctx["manifest"]["changes"]["previous"] = "lahman-2026-01-05"
     assert run(ctx, None, dry_run=True)["title"] == TAG
+
+
+def test_notes_describe_the_upstream_version_instead_of_naming_the_release(ctx):
+    first = make_notes(LAHMAN, ctx["manifest"]).splitlines()[0]
+    assert first == "Built from upstream Lahman database version 2025 (released 2026-01-02)."
