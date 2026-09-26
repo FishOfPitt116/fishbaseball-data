@@ -1,8 +1,7 @@
 name: publish-lahman
 on:
-  # The daily schedule is disabled until SABR's Box folder can be downloaded automatically
-  # (see pipelines/lahman/__init__.py: no download_urls yet). Until then, run this manually
-  # with `source_url` pointing at a zip of the CSVs. Re-enable with:
+  # The daily schedule stays off until the first release has been reviewed and approved by hand
+  # (run this workflow manually first). Then re-enable with:
   #   schedule: [{cron: "17 13 * * *"}]
   workflow_dispatch:
     inputs:

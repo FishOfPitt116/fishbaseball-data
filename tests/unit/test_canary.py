@@ -84,7 +84,7 @@ def test_header_drift_is_a_format_failure(fixtures, small_zip, tmp_path):
 
 
 def test_no_download_urls_skips_download_checks(fixtures):
-    checks = by_name(run_checks(LAHMAN, session(fixtures)))
+    checks = by_name(run_checks(dataclasses.replace(LAHMAN, download_urls=()), session(fixtures)))
     assert checks["download_is_zip"].skipped and checks["zip_contents"].skipped
     assert checks["download_is_zip"].ok
 
