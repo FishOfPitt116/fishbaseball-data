@@ -3,10 +3,6 @@ in the manifest via `schema_version`.
 
 Conventions: counts -> Int32; ids and codes -> Utf8; flags (Y/N) -> Utf8; debut, final_game and
 span dates -> Date; fractional stats -> Float64. Values that fail to cast are failures, never nulls.
-
-Keys, dtypes and year columns of AllstarFull, Appearances, the four Awards tables, FieldingOF and
-FieldingOFsplit were written from earlier releases (SABR's Box listing hid them); confirm on the
-first real run.
 """
 
 from __future__ import annotations
@@ -31,14 +27,14 @@ _NON_STRING: dict[str, tuple[str, str, str]] = {
     ),
     "awards_managers": ("year_id", "", ""),
     "awards_players": ("year_id", "", ""),
-    "awards_share_managers": ("year_id", "points_won points_max votes_first", ""),
-    "awards_share_players": ("year_id", "points_won points_max votes_first", ""),
+    "awards_share_managers": ("year_id points_won points_max votes_first", "", ""),
+    "awards_share_players": ("year_id points_won points_max votes_first", "", ""),
     "batting": ("stint " + _BATTING, "", ""),
     "batting_post": (_BATTING, "", ""),
     "college_playing": ("year_id", "", ""),
     "fielding": ("year_id stint g gs inn_outs po a e dp pb wp sb cs zr", "", ""),
     "fielding_of": ("year_id stint g_lf g_cf g_rf", "", ""),
-    "fielding_of_split": ("year_id stint g gs inn_outs po a e dp", "", ""),
+    "fielding_of_split": ("year_id stint g gs inn_outs po a e dp pb wp sb cs zr", "", ""),
     "fielding_post": ("year_id g gs inn_outs po a e dp tp pb sb cs", "", ""),
     "hall_of_fame": ("year_id ballots needed votes", "", ""),
     "home_games": ("year_key games openings attendance", "", "span_first span_last"),
@@ -89,10 +85,10 @@ def _dtypes() -> dict[str, dict[str, pl.DataType]]:
 DTYPES: dict[str, dict[str, pl.DataType]] = _dtypes()
 
 PRIMARY_KEYS: dict[str, list[str]] = {
-    "allstar_full": ["player_id", "year_id", "game_num", "game_id", "team_id"],
+    "allstar_full": ["player_id", "year_id", "game_num", "game_id", "team_id", "lg_id"],
     "appearances": ["year_id", "team_id", "player_id"],
     "awards_managers": ["year_id", "award_id", "lg_id", "player_id"],
-    "awards_players": ["year_id", "award_id", "lg_id", "player_id"],
+    "awards_players": ["year_id", "award_id", "lg_id", "player_id", "notes"],
     "awards_share_managers": ["award_id", "year_id", "lg_id", "player_id"],
     "awards_share_players": ["award_id", "year_id", "lg_id", "player_id"],
     "batting": ["player_id", "year_id", "stint"],

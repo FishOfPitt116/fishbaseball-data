@@ -1,6 +1,6 @@
 """Explicit source column -> snake_case map per table. No runtime heuristics: Lahman's
-acronyms (IPouts, BAOpp, GIDP) make automatic conversion unreliable. Columns of the tables whose
-headers were not verified against 2025 (see tests/fixtures/NOTICE.md) come from earlier releases."""
+acronyms (IPouts, BAOpp, GIDP) make automatic conversion unreliable. Verified against the
+Lahman 2025 CSVs."""
 
 COLUMNS: dict[str, dict[str, str]] = {
     "allstar_full": {
@@ -165,6 +165,11 @@ COLUMNS: dict[str, dict[str, str]] = {
         "A": "a",
         "E": "e",
         "DP": "dp",
+        "PB": "pb",
+        "WP": "wp",
+        "SB": "sb",
+        "CS": "cs",
+        "ZR": "zr",
     },
     "fielding_post": {
         "playerID": "player_id",
