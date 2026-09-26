@@ -1,0 +1,8 @@
+uv
+polars
+pyarrow
+pytest
+pytest-cov
+ruff
+pyright
+requests
