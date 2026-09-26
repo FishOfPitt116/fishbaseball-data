@@ -66,9 +66,14 @@ def report_failure(client: IssueClient, source: str, stage: str, error: str, run
     return client.create(f"{source} pipeline failed at {stage}", body, labels)
 
 
-def resolve(client: IssueClient, source: str, run_url: str) -> int:
-    """Close every open alert for `source`; returns how many were closed."""
-    numbers = client.find_open([f"pipeline:{source}"])
+def resolve(
+    client: IssueClient, source: str, run_url: str, stages: Sequence[str] | None = None
+) -> int:
+    """Close open alerts for `source` (only those of `stages` if given); returns the count."""
+    label_sets = [[f"pipeline:{source}", f"stage:{s}"] for s in stages or []] or [
+        [f"pipeline:{source}"]
+    ]
+    numbers = sorted({n for labels in label_sets for n in client.find_open(labels)})
     for n in numbers:
         client.close(n, f"Resolved by a successful run: {run_url}")
     return len(numbers)
@@ -80,10 +85,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--run-url", required=True)
     ap.add_argument("--out", default="build")
     ap.add_argument("--resolve", action="store_true", help="close open alerts (after a success)")
+    ap.add_argument("--stages", default="", help="comma-separated stages to limit --resolve to")
     args = ap.parse_args(argv)
     client = GhIssueClient(os.environ["GITHUB_REPOSITORY"])
     if args.resolve:
-        resolve(client, args.source, args.run_url)
+        stages = [x for x in args.stages.split(",") if x]
+        resolve(client, args.source, args.run_url, stages or None)
         return 0
     err_file = Path(args.out) / "error.json"
     info = json.loads(err_file.read_text()) if err_file.exists() else {}

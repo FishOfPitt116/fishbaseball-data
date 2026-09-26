@@ -120,3 +120,12 @@ def test_gh_issue_client_builds_commands():
     )
     assert any("gh issue create" in s and "--label pipeline:lahman" in s for s in calls)
     assert any("gh issue close 7" in s for s in calls)
+
+
+def test_resolve_can_be_limited_to_stages():
+    c = FakeIssues()
+    report_failure(c, "lahman", "build", "x", RUN)
+    report_failure(c, "lahman", "canary-format", "y", RUN)
+    assert resolve(c, "lahman", RUN, stages=["canary-format", "canary-availability"]) == 1
+    open_stages = [i["labels"][1] for i in c.issues.values() if i["open"]]
+    assert open_stages == ["stage:build"]

@@ -14,14 +14,12 @@ from typing import Any
 
 import requests
 
-from pipelines.core.config import SourceConfig, SourceSchema
 from pipelines.core.pipeline import StageError, run_all, stage_build, stage_detect, stage_publish
 from pipelines.core.publish import GhClient
-from pipelines.lahman import LAHMAN, LAHMAN_SCHEMA
+from pipelines.sources import SOURCES
 
 PIPELINE_VERSION = "0.1.0"
 DEFAULT_REPO = "FishOfPitt116/fishbaseball-data"
-SOURCES: dict[str, tuple[SourceConfig, SourceSchema]] = {"lahman": (LAHMAN, LAHMAN_SCHEMA)}
 
 
 def _read_json(path: Path, needs: str) -> dict[str, Any]:
