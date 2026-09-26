@@ -32,6 +32,7 @@ def main(
     argv: Sequence[str] | None = None,
     *,
     session: Any = None,
+    client: Any = None,
     full_dataset: bool = True,
     now: datetime | None = None,
 ) -> int:
@@ -50,7 +51,8 @@ def main(
     repo = os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPO)
     session = session or requests.Session()
     now = now or datetime.now(timezone.utc)
-    client = None if args.dry_run else GhClient(repo)
+    if client is None and not args.dry_run:
+        client = GhClient(repo)
     common: dict[str, Any] = {"out_dir": out_dir, "repo": repo, "session": session}
     error_file = out_dir / "error.json"
     try:

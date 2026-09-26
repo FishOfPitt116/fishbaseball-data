@@ -17,6 +17,7 @@ def cli(args, session, tmp_path, **kw):
     return main(
         ["lahman", *args, "--out", str(tmp_path / "out")],
         session=session,
+        client=FakeClient(),  # never the real gh
         full_dataset=False,
         **kw,
     )
