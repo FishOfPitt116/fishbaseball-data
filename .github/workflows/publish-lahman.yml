@@ -1,0 +1,46 @@
+name: publish-lahman
+on:
+  # The daily schedule is disabled until SABR's Box folder can be downloaded automatically
+  # (see pipelines/lahman/__init__.py: no download_urls yet). Until then, run this manually
+  # with `source_url` pointing at a zip of the CSVs. Re-enable with:
+  #   schedule: [{cron: "17 13 * * *"}]
+  workflow_dispatch:
+    inputs:
+      force: {type: boolean, default: false}
+      dry_run: {type: boolean, default: false}
+      source_url: {type: string, default: ""}
+permissions:
+  contents: write
+  issues: write
+concurrency: publish-lahman
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Run pipeline
+        env:
+          FORCE: ${{ inputs.force }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SOURCE_URL: ${{ inputs.source_url }}
+        run: |
+          args=()
+          [ "$FORCE" = "true" ] && args+=(--force)
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ -n "$SOURCE_URL" ] && args+=(--source-url "$SOURCE_URL")
+          python -m pipelines lahman all "${args[@]}"
+      - name: Close alerts after a successful run
+        if: success() && inputs.dry_run != true
+        run: >
+          python -m pipelines.core.alerts lahman --resolve --stages detect,build,publish
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Alert on failure
+        if: failure()
+        run: >
+          python -m pipelines.core.alerts lahman
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

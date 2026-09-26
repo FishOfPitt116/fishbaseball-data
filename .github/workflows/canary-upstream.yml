@@ -1,0 +1,40 @@
+name: canary-upstream
+on:
+  schedule: [{cron: "43 12 * * *"}]
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  actions: read
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Run checks
+        id: checks
+        continue-on-error: true
+        run: python -m pipelines.core.canary lahman
+      - name: Previous run conclusions
+        id: prev
+        run: >
+          echo "previous=$(gh run list --workflow canary-upstream.yml --status completed --limit 2
+          --json conclusion --jq '[.[].conclusion] | join(",")')" >> "$GITHUB_OUTPUT"
+      - name: Alert (format failures now, availability after 3 in a row)
+        if: steps.checks.outcome == 'failure'
+        run: >
+          python -m pipelines.core.canary lahman --alert --previous "${{ steps.prev.outputs.previous }}"
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Close canary alerts
+        if: steps.checks.outcome == 'success'
+        run: >
+          python -m pipelines.core.canary lahman --resolve
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Fail the run if checks failed
+        if: steps.checks.outcome == 'failure'
+        run: exit 1

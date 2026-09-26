@@ -10,8 +10,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12", cache: pip}
-      - run: pip install -r requirements.txt
-      - run: ruff check .
-      - run: pyright
-      - run: pytest tests/unit
+        with: {python-version: "3.12"}
+      - run: python -m venv .venv && .venv/bin/pip install -r requirements.txt
+      - run: .venv/bin/ruff check .
+      - run: .venv/bin/pyright
+      - run: .venv/bin/pytest tests/unit
+  integration:
+    # Real SABR requests; informational only because upstream availability is outside our control.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Only when pipelines/ changed
+        id: changed
+        run: |
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -q '^pipelines/'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - if: steps.changed.outputs.run == 'true'
+        run: python -m venv .venv && .venv/bin/pip install -r requirements.txt
+      - if: steps.changed.outputs.run == 'true'
+        run: .venv/bin/pytest tests/integration
