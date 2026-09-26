@@ -38,6 +38,7 @@ class FakeClient:
 
     def create_release(self, tag, title, notes, assets, *, latest=False):
         self.calls.append(("create_release", tag, latest))
+        self.tags.append(tag)
         for a in assets:
             self.assets[(tag, a.name)] = a.read_bytes()
 

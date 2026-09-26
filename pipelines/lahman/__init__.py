@@ -1,7 +1,8 @@
 import re
 
-from pipelines.core.config import SourceConfig
+from pipelines.core.config import SourceConfig, SourceSchema
 from pipelines.lahman.columns import COLUMNS
+from pipelines.lahman.schema import DTYPES, PRIMARY_KEYS, SCHEMA_VERSION, YEAR_COLUMNS, validate
 from pipelines.lahman.tables import TABLES
 
 # Box does not expose stable direct-download URLs for the CSV folder (see docs, open question 1),
@@ -15,4 +16,12 @@ LAHMAN = SourceConfig(
     columns=COLUMNS,
     license="CC BY-SA 3.0",
     attribution="Lahman Baseball Database © SABR, via Sean Lahman. CC BY-SA 3.0.",
+)
+
+LAHMAN_SCHEMA = SourceSchema(
+    version=SCHEMA_VERSION,
+    dtypes=DTYPES,
+    primary_keys=PRIMARY_KEYS,
+    year_columns=YEAR_COLUMNS,
+    validate=validate,
 )
