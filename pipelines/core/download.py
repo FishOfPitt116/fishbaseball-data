@@ -57,6 +57,8 @@ def download(
 ) -> Path:
     """Fetch a zip to `dest`, trying each URL in turn. `source_url` overrides all `urls`
     and may be a local file path or file:// URL. Never leaves a non-zip at `dest`."""
+    from pipelines.core.box import download_folder, is_box_share  # box imports this module
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     candidates = (source_url,) if source_url else urls
     if not candidates:
@@ -68,7 +70,11 @@ def download(
         tmp = dest.with_suffix(dest.suffix + ".part")
         try:
             local = Path(url.removeprefix("file://"))
-            if not url.startswith(("http://", "https://")) and local.is_file():
+            if is_box_share(url):
+                download_folder(
+                    url, tmp, session, user_agent=user_agent, max_bytes=max_bytes, timeout=timeout
+                )
+            elif not url.startswith(("http://", "https://")) and local.is_file():
                 if local.stat().st_size > max_bytes:
                     raise DownloadError(f"download exceeded size cap of {max_bytes} bytes")
                 shutil.copyfile(local, tmp)
