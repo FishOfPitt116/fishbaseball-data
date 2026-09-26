@@ -31,6 +31,7 @@ class FakeClient:
         self.tags = list(tags)
         self.corrupt = corrupt
         self.assets: dict[tuple[str, str], bytes] = {}
+        self.titles: dict[str, str] = {}
 
     def existing_tags(self):
         self.calls.append(("existing_tags",))
@@ -38,12 +39,14 @@ class FakeClient:
 
     def create_release(self, tag, title, notes, assets, *, latest=False):
         self.calls.append(("create_release", tag, latest))
+        self.titles[tag] = title
         self.tags.append(tag)
         for a in assets:
             self.assets[(tag, a.name)] = a.read_bytes()
 
     def ensure_release(self, tag, title, notes):
         self.calls.append(("ensure_release", tag))
+        self.titles.setdefault(tag, title)
 
     def upload_asset(self, tag, path, *, clobber=True):
         self.calls.append(("upload_asset", tag, path.name, clobber))
@@ -217,3 +220,15 @@ def test_gh_client_builds_commands(tmp_path: Path):
     )
     assert any("gh release upload lahman-latest" in s and "--clobber" in s for s in flat)
     assert any("gh release list" in s for s in flat)
+
+
+def test_release_and_pointer_titles_are_their_tags(ctx):
+    client = FakeClient()
+    plan = run(ctx, client)
+    assert plan["title"] == TAG and client.titles[TAG] == TAG
+    assert client.titles[POINTER_TAG] == POINTER_TAG
+
+
+def test_title_is_the_tag_even_after_a_previous_release(ctx):
+    ctx["manifest"]["changes"]["previous"] = "lahman-2026-01-05"
+    assert run(ctx, None, dry_run=True)["title"] == TAG

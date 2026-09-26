@@ -179,7 +179,7 @@ def _upload_pointer(
     path = build_dir / "latest.json"
     path.write_text(json.dumps(latest, indent=2) + "\n")
     tag = pointer_tag(source)
-    client.ensure_release(tag, f"{source.capitalize()} latest pointer", _pointer_notes(source))
+    client.ensure_release(tag, tag, _pointer_notes(source))
     client.upload_asset(tag, path, clobber=True)
 
 
@@ -195,9 +195,7 @@ def publish(
     now: datetime,
 ) -> dict[str, Any]:
     tag = manifest["tag"]
-    title = f"{config.name.capitalize()} {manifest['version']}"
-    if manifest["changes"]["previous"] is not None:
-        title += f" ({tag.removeprefix(config.name + '-')})"
+    title = tag  # several releases can share an upstream version; the dated tag is the name
     notes = make_notes(config, manifest)
     plan: dict[str, Any] = {
         "tag": tag, "title": title, "assets": _asset_names(manifest), "notes": notes,
