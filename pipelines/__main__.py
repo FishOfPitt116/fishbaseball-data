@@ -63,7 +63,7 @@ def main(
         elif args.command == "build":
             found = _read_json(out_dir / "detect.json", "detect")
             result = stage_build(
-                config, schema, client=client, found=found, now=now,
+                config, schema, client=client, found=found, now=now, force=args.force,
                 pipeline_version=PIPELINE_VERSION, full_dataset=full_dataset, **common,
             )  # fmt: skip
         elif args.command == "publish":

@@ -137,3 +137,13 @@ def test_html_download_fails_in_detect(env, fixtures):
     with pytest.raises(StageError) as e:
         go(fixtures / "box_login_page.html")
     assert e.value.stage == "detect"
+
+
+def test_force_publishes_a_new_release_even_with_unchanged_content(env, small_zip):
+    go, store = env
+    first = go(small_zip)
+    assert first["status"] == "published"
+    result = go(small_zip, force=True)
+    assert result["status"] == "published" and result["tag"] == "lahman-2026-10-02-2"
+    releases = [c[1] for c in store.calls if c[0] == "create_release"]
+    assert releases == ["lahman-2026-10-02", "lahman-2026-10-02-2"]

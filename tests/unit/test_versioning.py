@@ -42,6 +42,21 @@ def test_older_version_fails():
         decide(prev("2026"), "2025", HASHES)
 
 
+def test_force_publishes_even_with_identical_hashes():
+    d = decide(prev(), "2025", dict(HASHES), force=True)
+    assert d.release is True and d.reason == "forced"
+
+
+def test_force_does_not_relabel_a_real_content_change():
+    d = decide(prev(), "2025", {**HASHES, "batting": "c" * 64}, force=True)
+    assert d.release is True and d.reason == "content_changed"
+
+
+def test_force_does_not_override_an_upstream_regression():
+    with pytest.raises(UpstreamRegressionError):
+        decide(prev("2026"), "2025", HASHES, force=True)
+
+
 def test_tag_is_publish_date():
     assert next_tag("lahman", date(2026, 10, 2), []) == "lahman-2026-10-02"
 

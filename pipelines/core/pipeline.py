@@ -79,6 +79,7 @@ def stage_build(
     now: datetime,
     pipeline_version: str,
     full_dataset: bool,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Convert, validate, write Parquet + manifest. Returns build.json's content."""
     try:
@@ -97,7 +98,7 @@ def stage_build(
         for name, df in tables.items():
             write_parquet(df, out_dir / "tables" / f"{name}.parquet")
         hashes = {n: content_hash(df, schema.primary_keys[n]) for n, df in tables.items()}
-        decision = decide(previous, found["sabr_version"], hashes)
+        decision = decide(previous, found["sabr_version"], hashes, force=force)
         existing = client.existing_tags() if client is not None else []
         tag = next_tag(config.name, now.date(), existing)
         upstream = {
@@ -181,7 +182,7 @@ def run_all(
         return {"status": "no_change", "reason": found["reason"]}
     build = stage_build(
         config, schema, out_dir=out_dir, repo=repo, session=session, client=client, found=found,
-        now=now, pipeline_version=pipeline_version, full_dataset=full_dataset,
+        now=now, pipeline_version=pipeline_version, full_dataset=full_dataset, force=force,
     )  # fmt: skip
     return stage_publish(
         config, out_dir=out_dir, repo=repo, session=session, client=client, found=found,

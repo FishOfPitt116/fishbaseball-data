@@ -13,7 +13,7 @@ class UpstreamRegressionError(Exception):
 @dataclass(frozen=True)
 class Decision:
     release: bool
-    reason: str  # first_release | new_version | content_changed | content_unchanged
+    reason: str  # first_release | new_version | content_changed | content_unchanged | forced
 
 
 def _version_key(v: str) -> tuple[int, str]:
@@ -21,10 +21,16 @@ def _version_key(v: str) -> tuple[int, str]:
 
 
 def decide(
-    previous: Mapping[str, Any] | None, sabr_version: str, content_hashes: Mapping[str, str]
+    previous: Mapping[str, Any] | None,
+    sabr_version: str,
+    content_hashes: Mapping[str, str],
+    *,
+    force: bool = False,
 ) -> Decision:
     """Whether to cut a new release. Same upstream version with identical table content
-    (e.g. a BOM-only change) is not a release."""
+    (e.g. a BOM-only change) is not a release, unless `force` asks for one anyway (e.g. to
+    carry a manifest-only change, such as a new field, out to a release). `force` never
+    overrides the regression check: publishing older upstream data is always a mistake."""
     if previous is None:
         return Decision(True, "first_release")
     prev_version = str(previous["version"])
@@ -37,6 +43,8 @@ def decide(
     prev_hashes = {t: e["content_sha256"] for t, e in previous["tables"].items()}
     if dict(content_hashes) != prev_hashes:
         return Decision(True, "content_changed")
+    if force:
+        return Decision(True, "forced")
     return Decision(False, "content_unchanged")
 
 
