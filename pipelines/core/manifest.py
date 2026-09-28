@@ -59,6 +59,7 @@ def build_manifest(
     parquet_dir: Path,
     primary_keys: Mapping[str, Sequence[str]],
     year_columns: Mapping[str, str],
+    dtypes: Mapping[str, Mapping[str, pl.DataType]],
     schema_version: int,
     pipeline_version: str,
     built_at: datetime,
@@ -78,6 +79,9 @@ def build_manifest(
             "bytes": path.stat().st_size,
             "min_year": df[year_col].min() if year_col else None,
             "max_year": df[year_col].max() if year_col else None,
+            "columns": {c: str(t) for c, t in dtypes[name].items()},
+            "primary_key": list(primary_keys[name]),
+            "season_column": year_col,
         }
     return {
         "source": config.name,

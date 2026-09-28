@@ -40,6 +40,7 @@ def make(built, previous=None, tag=TAG):
         parquet_dir=out,
         primary_keys=PRIMARY_KEYS,
         year_columns=YEAR_COLUMNS,
+        dtypes=DTYPES,
         schema_version=SCHEMA_VERSION,
         pipeline_version="0.1.0",
         built_at=datetime(2026, 10, 2, 13, 20, 11, tzinfo=timezone.utc),
@@ -111,6 +112,7 @@ def test_changes_against_previous(built):
         parquet_dir=out,
         primary_keys=PRIMARY_KEYS,
         year_columns=YEAR_COLUMNS,
+        dtypes=DTYPES,
         schema_version=1,
         pipeline_version="0.1.0",
         built_at=datetime(2026, 10, 2, tzinfo=timezone.utc),
@@ -144,3 +146,23 @@ def test_previous_manifest_fixture_is_valid_for_versioning(fixtures: Path):
     prev = json.loads((fixtures / "previous_manifest.json").read_text())
     assert prev["source"] == "lahman" and prev["version"] == "2025"
     assert set(prev["tables"]) == set(LAHMAN.tables.values())
+
+
+def test_table_entries_carry_columns_primary_key_and_season_column(built):
+    m = make(built)
+    batting = m["tables"]["batting"]
+    assert batting["primary_key"] == PRIMARY_KEYS["batting"]
+    assert batting["season_column"] == "year_id"
+    assert batting["columns"]["player_id"] == "String"
+    assert batting["columns"]["year_id"] == "Int32"
+    assert batting["columns"]["hr"] == "Int32"
+    assert set(batting["columns"]) == set(DTYPES["batting"])
+    people = m["tables"]["people"]
+    assert people["season_column"] is None
+    assert people["primary_key"] == ["player_id"]
+
+
+def test_columns_match_dtypes_for_every_table(built):
+    m = make(built)
+    for name, entry in m["tables"].items():
+        assert entry["columns"] == {c: str(t) for c, t in DTYPES[name].items()}

@@ -13,6 +13,7 @@ from pipelines.core.publish import (
     make_latest,
     make_notes,
     make_notice,
+    mark_withdrawn,
     publish,
     record_upstream_seen,
 )
@@ -83,6 +84,7 @@ def ctx(tmp_path: Path, small_zip: Path):
         parquet_dir=out / "tables",
         primary_keys=PRIMARY_KEYS,
         year_columns=YEAR_COLUMNS,
+        dtypes=DTYPES,
         schema_version=SCHEMA_VERSION,
         pipeline_version="0.1.0",
         built_at=NOW,
@@ -167,6 +169,68 @@ def test_make_latest_keeps_other_schema_pointers(ctx):
     assert latest["upstream_seen"]["sha256"] == "a" * 64
     assert latest["upstream_seen"]["checked_at"] == "2026-10-02T13:20:11Z"
     assert latest["updated_at"] == "2026-10-02T13:20:11Z"
+
+
+def test_make_latest_appends_a_releases_entry_for_the_new_manifest(ctx):
+    prev = {"latest": None, "by_schema": {}, "releases": []}
+    seen = {"version": "2025", "sha256": "a" * 64}
+    latest = make_latest("lahman", prev, ctx["manifest"], seen, NOW)
+    assert latest["releases"] == [
+        {
+            "tag": TAG,
+            "version": "2025",
+            "schema_version": SCHEMA_VERSION,
+            "built_at": ctx["manifest"]["built_at"],
+            "withdrawn": False,
+        }
+    ]
+
+
+def test_make_latest_keeps_earlier_releases_in_the_index(ctx):
+    earlier = {
+        "tag": "lahman-2026-01-05", "version": "2025", "schema_version": 1,
+        "built_at": "2026-01-05T00:00:00Z", "withdrawn": False,
+    }  # fmt: skip
+    prev = {"latest": earlier["tag"], "by_schema": {"1": earlier["tag"]}, "releases": [earlier]}
+    latest = make_latest(
+        "lahman", prev, ctx["manifest"], {"version": "2025", "sha256": "a" * 64}, NOW
+    )
+    assert latest["releases"] == [
+        earlier,
+        {**earlier, "tag": TAG, "built_at": ctx["manifest"]["built_at"]},
+    ]
+
+
+def test_make_latest_without_a_previous_pointer_starts_a_fresh_index(ctx):
+    latest = make_latest(
+        "lahman", None, ctx["manifest"], {"version": "2025", "sha256": "a" * 64}, NOW
+    )
+    assert [r["tag"] for r in latest["releases"]] == [TAG]
+
+
+def test_make_latest_without_a_manifest_leaves_the_index_unchanged(ctx):
+    entry = {
+        "tag": "lahman-2026-01-05", "version": "2025", "schema_version": 1,
+        "built_at": "2026-01-05T00:00:00Z", "withdrawn": False,
+    }  # fmt: skip
+    prev = {"latest": entry["tag"], "by_schema": {"1": entry["tag"]}, "releases": [entry]}
+    latest = make_latest("lahman", prev, None, {"version": "2025", "sha256": "a" * 64}, NOW)
+    assert latest["releases"] == [entry]
+
+
+def test_mark_withdrawn_flags_one_release_and_leaves_others(ctx):
+    a = {"tag": "t1", "version": "1", "schema_version": 1, "built_at": "x", "withdrawn": False}
+    b = {"tag": "t2", "version": "1", "schema_version": 1, "built_at": "y", "withdrawn": False}
+    pointer = {"latest": "t2", "by_schema": {"1": "t2"}, "releases": [a, b]}
+    updated = mark_withdrawn(pointer, "t1")
+    assert [r["withdrawn"] for r in updated["releases"]] == [True, False]
+    assert updated["latest"] == "t2"  # withdrawing an old release doesn't move the pointer
+
+
+def test_mark_withdrawn_unknown_tag_raises(ctx):
+    pointer = {"latest": "t1", "by_schema": {}, "releases": [{"tag": "t1", "withdrawn": False}]}
+    with pytest.raises(KeyError, match="nope"):
+        mark_withdrawn(pointer, "nope")
 
 
 def test_record_upstream_seen_keeps_latest_pointer(ctx):

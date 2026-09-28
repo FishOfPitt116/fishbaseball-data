@@ -110,7 +110,7 @@ def stage_build(
         manifest = build_manifest(
             config, tag=tag, repo=repo, upstream=upstream, tables=tables,
             parquet_dir=out_dir / "tables", primary_keys=schema.primary_keys,
-            year_columns=schema.year_columns, schema_version=schema.version,
+            year_columns=schema.year_columns, dtypes=schema.dtypes, schema_version=schema.version,
             pipeline_version=pipeline_version, built_at=now, previous=previous,
         )  # fmt: skip
         _write_json(out_dir / "manifest.json", manifest)

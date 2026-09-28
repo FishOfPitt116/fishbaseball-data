@@ -115,17 +115,40 @@ def make_latest(
     its schema version); without one it only records what upstream we last saw."""
     prev = previous or {}
     by_schema = dict(prev.get("by_schema", {}))
+    releases = [dict(r) for r in prev.get("releases", [])]
     latest = prev.get("latest")
     if manifest is not None:
         latest = manifest["tag"]
         by_schema[str(manifest["schema_version"])] = manifest["tag"]
+        releases.append(
+            {
+                "tag": manifest["tag"],
+                "version": manifest["version"],
+                "schema_version": manifest["schema_version"],
+                "built_at": manifest["built_at"],
+                "withdrawn": False,
+            }
+        )
     return {
         "source": source,
         "latest": latest,
         "by_schema": by_schema,
+        "releases": releases,
         "upstream_seen": {**upstream_seen, "checked_at": _utc(now)},
         "updated_at": _utc(now),
     }
+
+
+def mark_withdrawn(pointer: Mapping[str, Any], tag: str) -> dict[str, Any]:
+    """Flag `tag` as withdrawn in a `latest.json` object, for the rollback runbook. Does not
+    move `latest`/`by_schema`; do that (point them at the replacement release) separately."""
+    releases = [dict(r) for r in pointer.get("releases", [])]
+    if not any(r["tag"] == tag for r in releases):
+        raise KeyError(f"no release {tag!r} in the releases index")
+    for r in releases:
+        if r["tag"] == tag:
+            r["withdrawn"] = True
+    return {**pointer, "releases": releases}
 
 
 def _sha256(data: bytes) -> str:
