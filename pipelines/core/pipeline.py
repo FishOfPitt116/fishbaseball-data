@@ -7,11 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import requests
-
 from pipelines.core.config import SourceConfig, SourceSchema
 from pipelines.core.convert import content_hash, read_tables, write_parquet
 from pipelines.core.detect import USER_AGENT, detect, fetch_latest
+from pipelines.core.http import new_session
 from pipelines.core.manifest import build_manifest, release_url
 from pipelines.core.publish import (
     ReleaseClient,
@@ -173,7 +172,7 @@ def run_all(
     pipeline_version: str,
     full_dataset: bool = True,
 ) -> dict[str, Any]:
-    session = session or requests.Session()
+    session = session or new_session()
     out_dir.mkdir(parents=True, exist_ok=True)
     found = stage_detect(
         config, out_dir=out_dir, repo=repo, session=session, source_url=source_url, force=force

@@ -21,12 +21,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-import requests
-
 from pipelines.core.alerts import GhIssueClient, report_failure, resolve
 from pipelines.core.config import SourceConfig
 from pipelines.core.detect import USER_AGENT, UpstreamFormatError, parse_page
 from pipelines.core.download import DownloadError, download
+from pipelines.core.http import new_session
 
 CANARY_STAGES = ("canary-format", "canary-availability")
 CSV_LINK = re.compile(
@@ -158,7 +157,7 @@ def main(argv: Sequence[str] | None = None, *, session: Any = None) -> int:
         return 0
 
     config, _ = SOURCES[args.source]
-    checks = run_checks(config, session or requests.Session())
+    checks = run_checks(config, session or new_session())
     results_file.write_text(json.dumps([asdict(c) for c in checks], indent=2) + "\n")
     for c in checks:
         state = "skip" if c.skipped else ("ok" if c.ok else "FAIL")

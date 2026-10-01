@@ -12,8 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import requests
-
+from pipelines.core.http import new_session
 from pipelines.core.pipeline import StageError, run_all, stage_build, stage_detect, stage_publish
 from pipelines.core.publish import GhClient
 from pipelines.sources import SOURCES
@@ -49,7 +48,7 @@ def main(
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     repo = os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPO)
-    session = session or requests.Session()
+    session = session or new_session()
     now = now or datetime.now(timezone.utc)
     if client is None and not args.dry_run:
         client = GhClient(repo)
