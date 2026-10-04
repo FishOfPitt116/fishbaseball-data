@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import zipfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import polars as pl
@@ -26,8 +26,14 @@ class CastError(ConvertError):
     pass
 
 
-def _csv_members(zf: zipfile.ZipFile) -> dict[str, str]:
-    """Map CSV base name -> zip member name, ignoring folders, macOS cruft and non-CSVs."""
+def _csv_members(
+    zf: zipfile.ZipFile, normalize: Callable[[str], str] | None = None
+) -> dict[str, str]:
+    """Map CSV name (after `normalize`, if given) -> zip member path, ignoring folders,
+    macOS cruft and non-CSVs. `normalize` lets a source whose per-partition zips prefix every
+    file (Retrosheet: the season, e.g. "2024batting.csv") match the same `config.tables` keys
+    every partition; two raw names that normalize to the same name are a hard failure, not a
+    silent overwrite."""
     members: dict[str, str] = {}
     for info in zf.infolist():
         parts = info.filename.split("/")
@@ -39,9 +45,10 @@ def _csv_members(zf: zipfile.ZipFile) -> dict[str, str]:
             or not base.lower().endswith(".csv")
         ):
             continue
-        if base in members:
-            raise InventoryError(f"duplicate CSV in zip: {base}")
-        members[base] = info.filename
+        name = normalize(base) if normalize else base
+        if name in members:
+            raise InventoryError(f"duplicate CSV in zip (as {name!r}): {base}")
+        members[name] = info.filename
     return members
 
 
@@ -110,10 +117,14 @@ def read_tables(
     config: SourceConfig,
     dtypes: Mapping[str, Mapping[str, pl.DataType]],
     primary_keys: Mapping[str, Sequence[str]],
+    *,
+    normalize_member_name: Callable[[str], str] | None = None,
 ) -> dict[str, pl.DataFrame]:
-    """Inventory, read (UTF-8, BOM stripped, all Utf8), rename, cast strictly, sort by key."""
+    """Inventory, read (UTF-8, BOM stripped, all Utf8), rename, cast strictly, sort by key.
+    `normalize_member_name` is for sources with per-partition-prefixed CSV names; see
+    `_csv_members`. Lahman passes none, so its exact-filename matching is unchanged."""
     with zipfile.ZipFile(zip_path) as zf:
-        members = _csv_members(zf)
+        members = _csv_members(zf, normalize_member_name)
         inventory(list(members), config)
         tables: dict[str, pl.DataFrame] = {}
         for csv_name, member in sorted(members.items()):
