@@ -114,7 +114,7 @@ def stage_build(
             pipeline_version=pipeline_version, built_at=now, previous=previous,
         )  # fmt: skip
         _write_json(out_dir / "manifest.json", manifest)
-        (out_dir / "NOTICE.md").write_text(make_notice(config, manifest))
+        (out_dir / "NOTICE.md").write_text(make_notice(config, manifest, extra=config.extra_notice))
         build = {"release": decision.release, "reason": decision.reason, "tag": tag}
         _write_json(out_dir / "build.json", build)
         return build

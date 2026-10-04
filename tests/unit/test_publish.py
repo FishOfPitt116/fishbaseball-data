@@ -90,7 +90,7 @@ def ctx(tmp_path: Path, small_zip: Path):
         built_at=NOW,
     )
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
-    (out / "NOTICE.md").write_text(make_notice(LAHMAN, manifest))
+    (out / "NOTICE.md").write_text(make_notice(LAHMAN, manifest, extra=LAHMAN.extra_notice))
     return {"manifest": manifest, "out": out, "zip": small_zip}
 
 
@@ -255,7 +255,7 @@ def test_notes_mention_version_changes_and_attribution(ctx):
 
 
 def test_notice_states_license_and_negro_leagues_source(ctx):
-    n = make_notice(LAHMAN, ctx["manifest"])
+    n = make_notice(LAHMAN, ctx["manifest"], extra=LAHMAN.extra_notice)
     assert "CC BY-SA 3.0" in n and "Seamheads" in n
 
 

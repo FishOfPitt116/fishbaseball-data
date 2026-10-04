@@ -16,6 +16,10 @@ LAHMAN = SourceConfig(
     columns=COLUMNS,
     license="CC BY-SA 3.0",
     attribution="Lahman Baseball Database © SABR, via Sean Lahman. CC BY-SA 3.0.",
+    extra_notice=(
+        "See http://creativecommons.org/licenses/by-sa/3.0/ for the full CC BY-SA 3.0 text. "
+        "Negro Leagues data is licensed by SABR from Seamheads.com."
+    ),
 )
 
 LAHMAN_SCHEMA = SourceSchema(

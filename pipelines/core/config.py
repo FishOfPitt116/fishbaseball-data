@@ -36,6 +36,7 @@ class SourceConfig:
     attribution: str
     row_shrink_tolerance: float = 0.005
     partitions: PartitionConfig | None = None  # None: a single zip, like Lahman
+    extra_notice: str = ""  # one source-specific sentence appended to NOTICE.md
 
 
 @dataclass(frozen=True)

@@ -69,25 +69,36 @@ def pointer_tag(source: str) -> str:
     return f"{source}{POINTER_SUFFIX}"
 
 
-def make_notice(config: SourceConfig, manifest: Mapping[str, Any]) -> str:
+def make_notice(config: SourceConfig, manifest: Mapping[str, Any], *, extra: str = "") -> str:
+    """`extra` is for a source-specific sentence (e.g. Lahman's Negro Leagues/Seamheads
+    attribution) that doesn't belong hardcoded in a function every source shares."""
     up = manifest["upstream"]
-    return (
+    version_line = f"version {up['version']}"
+    if up.get("released"):
+        version_line += f", released {up['released']}"
+    notice = (
         f"# {config.name.capitalize()} data notice\n\n"
         f"{config.attribution}\n\n"
-        f"License: {config.license} (http://creativecommons.org/licenses/by-sa/3.0/). "
-        f"Derived files here (Parquet conversions) are shared under the same license.\n\n"
-        f"Upstream: {up['page_url']} — version {up['version']}, released {up['released']}. "
-        "Negro Leagues data is licensed by SABR from Seamheads.com. "
-        "These files are converted, unmodified in content, from SABR's CSV release; "
-        "column names were changed to snake_case (see `column_map` in manifest.json).\n"
+        f"License: {config.license}. Derived files here (Parquet conversions) are shared "
+        "under the same license.\n\n"
+        f"Upstream: {up['page_url']} — {version_line}. These files are converted, unmodified "
+        "in content, from the upstream CSV release; column names were changed to snake_case "
+        "(see `column_map` in manifest.json)."
     )
+    if extra:
+        notice += f" {extra}"
+    return notice + "\n"
 
 
 def make_notes(config: SourceConfig, manifest: Mapping[str, Any]) -> str:
     up, ch = manifest["upstream"], manifest["changes"]
+    version_line = (
+        f"Built from upstream {config.name.capitalize()} database version {up['version']}"
+    )
+    if up.get("released"):
+        version_line += f" (released {up['released']})"
     lines = [
-        f"Built from upstream {config.name.capitalize()} database version {up['version']} "
-        f"(released {up['released']}).",
+        version_line + ".",
         f"Schema version {manifest['schema_version']}. Built {manifest['built_at']}.",
         "",
         "## Changes",
@@ -98,8 +109,15 @@ def make_notes(config: SourceConfig, manifest: Mapping[str, Any]) -> str:
         lines.append(f"Since `{ch['previous']}`:")
         lines.append(f"- tables added: {ch['tables_added'] or 'none'}")
         lines.append(f"- tables changed: {ch['tables_changed'] or 'none'}")
+        if partitions_changed := ch.get("partitions_changed"):
+            for table, seasons in partitions_changed.items():
+                lines.append(f"- {table}: partitions rebuilt: {seasons}")
         for table, delta in ch["row_deltas"].items():
-            lines.append(f"- {table}: {delta:+d} rows")
+            if isinstance(delta, dict):
+                parts = ", ".join(f"{k}: {v:+d}" for k, v in sorted(delta.items()))
+                lines.append(f"- {table}: {parts}")
+            else:
+                lines.append(f"- {table}: {delta:+d} rows")
     lines += ["", config.attribution]
     return "\n".join(lines) + "\n"
 
@@ -155,28 +173,49 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _table_entries(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Every (file, sha256) pair this manifest describes: one per single-file table, or one
+    per partition for a partitioned table."""
+    entries = []
+    for entry in manifest["tables"].values():
+        if entry.get("partitioned"):
+            entries += list(entry["partitions"].values())
+        else:
+            entries.append(entry)
+    return entries
+
+
+def _fresh_table_files(manifest: Mapping[str, Any], build_dir: Path) -> list[dict[str, Any]]:
+    """Which of `_table_entries` this release actually uploads: every single-file table
+    (always rebuilt in full) plus only the partitions whose Parquet was written this run — an
+    unchanged partition's manifest entry just points at whichever older release already holds
+    it, and its file was never written here, so it's never re-uploaded."""
+    tables_dir = build_dir / "tables"
+    return [e for e in _table_entries(manifest) if (tables_dir / e["file"]).exists()]
+
+
 def _stage_assets(
-    manifest: Mapping[str, Any], build_dir: Path, zip_path: Path, dest: Path
+    manifest: Mapping[str, Any], build_dir: Path, zip_path: Path | None, dest: Path
 ) -> list[Path]:
     dest.mkdir(parents=True, exist_ok=True)
-    sources = [build_dir / "tables" / t["file"] for t in manifest["tables"].values()]
+    sources = [build_dir / "tables" / e["file"] for e in _fresh_table_files(manifest, build_dir)]
     sources += [build_dir / "manifest.json", build_dir / "NOTICE.md"]
     staged = []
     for src in sources:
         shutil.copyfile(src, dest / src.name)
         staged.append(dest / src.name)
-    shutil.copyfile(zip_path, dest / manifest["upstream"]["file"])
-    staged.append(dest / manifest["upstream"]["file"])
+    if zip_path is not None:
+        shutil.copyfile(zip_path, dest / manifest["upstream"]["file"])
+        staged.append(dest / manifest["upstream"]["file"])
     return staged
 
 
-def _asset_names(manifest: Mapping[str, Any]) -> list[str]:
-    return [
-        *(t["file"] for t in manifest["tables"].values()),
-        "manifest.json",
-        manifest["upstream"]["file"],
-        "NOTICE.md",
-    ]
+def _asset_names(manifest: Mapping[str, Any], build_dir: Path) -> list[str]:
+    names = [e["file"] for e in _fresh_table_files(manifest, build_dir)]
+    names += ["manifest.json", "NOTICE.md"]
+    if "file" in manifest.get("upstream", {}):
+        names.append(manifest["upstream"]["file"])
+    return names
 
 
 def _verify(client: ReleaseClient, manifest: Mapping[str, Any], build_dir: Path) -> None:
@@ -184,7 +223,10 @@ def _verify(client: ReleaseClient, manifest: Mapping[str, Any], build_dir: Path)
     remote = client.fetch(tag, "manifest.json")
     if _sha256(remote) != _sha256((build_dir / "manifest.json").read_bytes()):
         raise PublishError(f"verification failed: manifest.json from {tag} differs from local")
-    entry = next(iter(manifest["tables"].values()))
+    fresh = _fresh_table_files(manifest, build_dir)
+    if not fresh:
+        return  # nothing else was actually uploaded this release
+    entry = fresh[0]
     if _sha256(client.fetch(tag, entry["file"])) != entry["sha256"]:
         raise PublishError(f"verification failed: {entry['file']} from {tag} has wrong SHA-256")
 
@@ -213,16 +255,21 @@ def publish(
     config: SourceConfig,
     manifest: Mapping[str, Any],
     build_dir: Path,
-    zip_path: Path,
+    zip_path: Path | None,
     previous_latest: Mapping[str, Any] | None,
     dry_run: bool,
     now: datetime,
+    upstream_seen: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """`upstream_seen` is what gets written to the `latest.json` pointer for change detection
+    on the next run. Default (`None`): Lahman's shape, `{"version", "sha256"}` from the single
+    upstream zip. A partitioned source (no single zip) passes its own shape explicitly — e.g.
+    per-partition ETags — since there's nothing to derive it from here."""
     tag = manifest["tag"]
     title = tag  # several releases can share an upstream version; the dated tag is the name
     notes = make_notes(config, manifest)
     plan: dict[str, Any] = {
-        "tag": tag, "title": title, "assets": _asset_names(manifest), "notes": notes,
+        "tag": tag, "title": title, "assets": _asset_names(manifest, build_dir), "notes": notes,
         "published": False,
     }  # fmt: skip
     if dry_run:
@@ -234,11 +281,15 @@ def publish(
     assets = _stage_assets(manifest, build_dir, zip_path, build_dir / "release_assets")
     client.create_release(tag, title, notes, assets, latest=False)
     _verify(client, manifest, build_dir)
-    seen = {"version": manifest["upstream"]["version"], "sha256": manifest["upstream"]["sha256"]}
+    if upstream_seen is None:
+        upstream_seen = {
+            "version": manifest["upstream"]["version"],
+            "sha256": manifest["upstream"]["sha256"],
+        }
     _upload_pointer(
         client,
         config.name,
-        make_latest(config.name, previous_latest, manifest, seen, now),
+        make_latest(config.name, previous_latest, manifest, upstream_seen, now),
         build_dir,
     )
     plan["published"] = True
