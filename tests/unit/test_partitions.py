@@ -7,6 +7,7 @@ from pipelines.core.partitions import (
     PartitionCheck,
     check_all_partitions,
     check_partition,
+    decide_partitions,
     download_partition,
 )
 
@@ -191,3 +192,51 @@ def test_check_all_partitions_with_no_prior_history_is_all_changed():
         StubConfig(partitions), session=s, previous_upstream_seen=None, user_agent=UA
     )
     assert results["2024"].changed is True
+
+
+# ---- decide_partitions -------------------------------------------------------------------
+
+
+def test_decide_partitions_first_release_publishes():
+    d = decide_partitions({"2024": PartitionCheck("2024", True, '"a"')}, first_release=True)
+    assert d.release is True and d.reason == "first_release" and d.changed_seasons == ["2024"]
+
+
+def test_decide_partitions_some_changed_publishes():
+    checks = {
+        "2023": PartitionCheck("2023", False, '"a"'),
+        "2024": PartitionCheck("2024", True, '"b"'),
+    }
+    d = decide_partitions(checks, first_release=False)
+    assert d.release is True and d.reason == "content_changed" and d.changed_seasons == ["2024"]
+
+
+def test_decide_partitions_nothing_changed_does_not_publish():
+    checks = {
+        "2023": PartitionCheck("2023", False, '"a"'),
+        "2024": PartitionCheck("2024", False, '"b"'),
+    }
+    d = decide_partitions(checks, first_release=False)
+    assert d.release is False and d.reason == "content_unchanged" and d.changed_seasons == []
+
+
+def test_decide_partitions_forced_with_nothing_changed_still_publishes():
+    checks = {"2024": PartitionCheck("2024", False, '"a"')}
+    d = decide_partitions(checks, first_release=False, force=True)
+    assert d.release is True and d.reason == "forced" and d.changed_seasons == []
+
+
+def test_decide_partitions_forced_with_real_changes_reports_content_changed():
+    checks = {"2024": PartitionCheck("2024", True, '"a"')}
+    d = decide_partitions(checks, first_release=False, force=True)
+    assert d.release is True and d.reason == "content_changed"
+
+
+def test_decide_partitions_changed_seasons_are_sorted():
+    checks = {
+        "2025": PartitionCheck("2025", True, '"a"'),
+        "1911": PartitionCheck("1911", True, '"b"'),
+        "2001": PartitionCheck("2001", False, '"c"'),
+    }
+    d = decide_partitions(checks, first_release=False)
+    assert d.changed_seasons == ["1911", "2025"]

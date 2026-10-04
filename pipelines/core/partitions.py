@@ -60,6 +60,29 @@ def download_partition(
     return zip_path, sha256_file(zip_path)
 
 
+@dataclass(frozen=True)
+class PartitionDecision:
+    release: bool
+    reason: str  # first_release | content_changed | content_unchanged | forced
+    changed_seasons: list[str]  # which partition keys actually need rebuilding this run
+
+
+def decide_partitions(
+    checks: dict[str, PartitionCheck], *, first_release: bool, force: bool = False
+) -> PartitionDecision:
+    """Whether to cut a new release, for a source whose change detection is per-partition
+    rather than one upstream version string. Unlike Lahman's `decide()`, there's no upstream
+    regression to guard against here: a partition either changed or it didn't."""
+    changed = sorted(key for key, c in checks.items() if c.changed)
+    if first_release:
+        return PartitionDecision(True, "first_release", changed)
+    if changed:
+        return PartitionDecision(True, "content_changed", changed)
+    if force:
+        return PartitionDecision(True, "forced", changed)
+    return PartitionDecision(False, "content_unchanged", changed)
+
+
 def check_all_partitions(
     config: Any,
     *,
