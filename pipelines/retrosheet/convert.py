@@ -11,7 +11,6 @@ from pathlib import Path
 import polars as pl
 
 from pipelines.core.convert import read_tables
-from pipelines.retrosheet import RETROSHEET
 from pipelines.retrosheet.schema import (
     CSV_DTYPES,
     NATIVE_SEASON_TABLES,
@@ -25,6 +24,11 @@ _YEAR_PREFIX = re.compile(r"^\d{4}")
 
 
 def read_season(zip_path: Path, season: str) -> dict[str, pl.DataFrame]:
+    # Deferred: `pipelines.retrosheet.__init__` imports this module to build `RETROSHEET`
+    # itself (for `PartitionConfig.convert`), so importing it back at module load time would
+    # deadlock; by the time this function actually runs, that module is fully initialized.
+    from pipelines.retrosheet import RETROSHEET
+
     tables = read_tables(
         zip_path,
         RETROSHEET,

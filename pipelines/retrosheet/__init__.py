@@ -2,6 +2,7 @@ import re
 
 from pipelines.core.config import PartitionConfig, SourceConfig, SourceSchema
 from pipelines.retrosheet.columns import COLUMNS
+from pipelines.retrosheet.convert import read_season
 from pipelines.retrosheet.schema import (
     DTYPES,
     PRIMARY_KEYS,
@@ -19,7 +20,10 @@ from pipelines.retrosheet.tables import TABLES
 PARTITIONED_TABLES = frozenset({"plays", "batting", "pitching", "fielding", "team_stats"})
 
 PARTITIONS = PartitionConfig(
-    discover=discover_seasons, url=season_zip_url, partitioned_tables=PARTITIONED_TABLES
+    discover=discover_seasons,
+    url=season_zip_url,
+    partitioned_tables=PARTITIONED_TABLES,
+    convert=read_season,
 )
 
 RETROSHEET = SourceConfig(

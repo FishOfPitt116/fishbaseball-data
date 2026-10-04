@@ -27,6 +27,7 @@ def test_source_config_accepts_a_partition_config():
         discover=lambda session: ["2024", "2025"],
         url=lambda key: f"https://example.test/{key}.zip",
         partitioned_tables=frozenset({"plays"}),
+        convert=lambda zip_path, key: {},
     )
     config = make_config(partitions=partitions)
     assert config.partitions is partitions
@@ -36,5 +37,8 @@ def test_source_config_accepts_a_partition_config():
 
 
 def test_partition_config_is_frozen_and_comparable():
-    a = PartitionConfig(discover=lambda s: [], url=lambda k: "", partitioned_tables=frozenset())
+    a = PartitionConfig(
+        discover=lambda s: [], url=lambda k: "", partitioned_tables=frozenset(),
+        convert=lambda zip_path, key: {},
+    )  # fmt: skip
     assert a.partitioned_tables == frozenset()

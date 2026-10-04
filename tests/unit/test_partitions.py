@@ -134,6 +134,7 @@ def make_partitions(keys):
         discover=lambda session: keys,
         url=lambda key: f"https://x/{key}.zip",
         partitioned_tables=frozenset({"plays"}),
+        convert=lambda zip_path, key: {},
     )
 
 

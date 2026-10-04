@@ -22,6 +22,7 @@ class PartitionConfig:
     discover: Callable[[Any], list[str]]  # session -> sorted partition keys, e.g. year strings
     url: Callable[[str], str]  # partition key -> zip download URL
     partitioned_tables: frozenset[str]  # this source's tables that are split per partition
+    convert: Callable[[Any, str], Mapping[str, pl.DataFrame]]  # zip path, key -> that key's tables
 
 
 @dataclass(frozen=True)

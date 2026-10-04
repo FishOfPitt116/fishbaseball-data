@@ -29,7 +29,7 @@ class StageError(Exception):
         super().__init__(f"[{stage}] {message}")
 
 
-def _fetch_previous_manifest(
+def fetch_previous_manifest(
     repo: str, previous_latest: dict[str, Any] | None, session: Any
 ) -> dict[str, Any] | None:
     if not previous_latest or not previous_latest.get("latest"):
@@ -40,11 +40,11 @@ def _fetch_previous_manifest(
     return resp.json()
 
 
-def _write_json(path: Path, data: Any) -> None:
+def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
 
 
-def _latest_url(config: SourceConfig, repo: str) -> str:
+def latest_url(config: SourceConfig, repo: str) -> str:
     return release_url(repo, pointer_tag(config.name), "latest.json")
 
 
@@ -57,9 +57,16 @@ def stage_detect(
     source_url: str | None,
     force: bool,
 ) -> dict[str, Any]:
+    """A partitioned source (Retrosheet: per-season zips) has no single upstream version
+    string or zip to detect against, so its stages live separately in
+    `pipelines.core.partitioned_pipeline`; `source_url` doesn't apply there and is ignored."""
+    if config.partitions is not None:
+        from pipelines.core.partitioned_pipeline import stage_detect as partitioned_detect
+
+        return partitioned_detect(config, out_dir=out_dir, repo=repo, session=session, force=force)
     try:
         return detect(
-            config, out_dir=out_dir, latest_url=_latest_url(config, repo), session=session,
+            config, out_dir=out_dir, latest_url=latest_url(config, repo), session=session,
             source_url=source_url, force=force,
         )  # fmt: skip
     except Exception as e:
@@ -81,9 +88,16 @@ def stage_build(
     force: bool = False,
 ) -> dict[str, Any]:
     """Convert, validate, write Parquet + manifest. Returns build.json's content."""
+    if config.partitions is not None:
+        from pipelines.core.partitioned_pipeline import stage_build as partitioned_build
+
+        return partitioned_build(
+            config, schema, out_dir=out_dir, repo=repo, session=session, client=client,
+            found=found, now=now, pipeline_version=pipeline_version,
+        )  # fmt: skip
     try:
-        previous_latest = fetch_latest(_latest_url(config, repo), session)
-        previous = _fetch_previous_manifest(repo, previous_latest, session)
+        previous_latest = fetch_latest(latest_url(config, repo), session)
+        previous = fetch_previous_manifest(repo, previous_latest, session)
         tables = read_tables(Path(found["zip_path"]), config, schema.dtypes, schema.primary_keys)
         failures = schema.validate(tables, full_dataset=full_dataset)
         if failures:
@@ -113,10 +127,10 @@ def stage_build(
             year_columns=schema.year_columns, dtypes=schema.dtypes, schema_version=schema.version,
             pipeline_version=pipeline_version, built_at=now, previous=previous,
         )  # fmt: skip
-        _write_json(out_dir / "manifest.json", manifest)
+        write_json(out_dir / "manifest.json", manifest)
         (out_dir / "NOTICE.md").write_text(make_notice(config, manifest, extra=config.extra_notice))
         build = {"release": decision.release, "reason": decision.reason, "tag": tag}
-        _write_json(out_dir / "build.json", build)
+        write_json(out_dir / "build.json", build)
         return build
     except Exception as e:
         raise StageError("build", str(e)) from e
@@ -134,8 +148,15 @@ def stage_publish(
     dry_run: bool,
     now: datetime,
 ) -> dict[str, Any]:
+    if config.partitions is not None:
+        from pipelines.core.partitioned_pipeline import stage_publish as partitioned_publish
+
+        return partitioned_publish(
+            config, out_dir=out_dir, repo=repo, session=session, client=client, found=found,
+            build=build, dry_run=dry_run, now=now,
+        )  # fmt: skip
     try:
-        previous_latest = fetch_latest(_latest_url(config, repo), session)
+        previous_latest = fetch_latest(latest_url(config, repo), session)
         if not build["release"]:
             seen = {"version": found["sabr_version"], "sha256": found["upstream_sha256"]}
             if not dry_run and client is not None and previous_latest is not None:
