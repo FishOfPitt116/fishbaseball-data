@@ -95,7 +95,9 @@ def test_date_format_can_be_overridden_for_retrosheets_yyyymmdd(tmp_path: Path):
         tables={"g.csv": "g"}, columns={"g": {"date": "date"}}, license="x", attribution="x",
     )  # fmt: skip
     z = make_zip(tmp_path / "z.zip", {"g.csv": "date\n20240320\n"})
-    tables = read_tables(z, config, {"g": {"date": pl.Date()}}, {"g": ["date"]}, date_format="%Y%m%d")
+    tables = read_tables(
+        z, config, {"g": {"date": pl.Date()}}, {"g": ["date"]}, date_format="%Y%m%d"
+    )
     assert tables["g"]["date"].to_list() == [date(2024, 3, 20)]
 
 
