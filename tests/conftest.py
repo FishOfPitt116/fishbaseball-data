@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import pathlib
 
+import polars as pl
 import pytest
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "lahman"
+RETROSHEET_FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "retrosheet"
+RETROSHEET_SEASONS = (1927, 1956, 2001)
 
 
 @pytest.fixture
@@ -13,6 +18,57 @@ def fixtures() -> pathlib.Path:
 @pytest.fixture
 def small_zip(fixtures: pathlib.Path) -> pathlib.Path:
     return fixtures / "lahman_small.zip"
+
+
+@pytest.fixture(scope="session")
+def retrosheet_fixtures() -> pathlib.Path:
+    return RETROSHEET_FIXTURES
+
+
+@pytest.fixture(scope="session")
+def retrosheet_season_zips(retrosheet_fixtures: pathlib.Path) -> dict[int, pathlib.Path]:
+    return {year: retrosheet_fixtures / f"{year}csvs.zip" for year in RETROSHEET_SEASONS}
+
+
+def read_retrosheet_season(zip_path: pathlib.Path, year: int) -> dict[str, pl.DataFrame]:
+    """Convert one fixture season zip exactly as the real pipeline will: normalize the
+    year-prefixed member names, cast with Retrosheet's dtypes/date format/null markers, then
+    stamp `season` onto the tables that don't carry it natively."""
+    import re
+
+    from pipelines.core.convert import read_tables
+    from pipelines.retrosheet import RETROSHEET
+    from pipelines.retrosheet.schema import CSV_DTYPES, NATIVE_SEASON_TABLES, PRIMARY_KEYS
+
+    tables = read_tables(
+        zip_path,
+        RETROSHEET,
+        CSV_DTYPES,
+        PRIMARY_KEYS,
+        normalize_member_name=lambda name: re.sub(r"^\d{4}", "", name),
+        date_format="%Y%m%d",
+        null_markers=frozenset({"", "?"}),
+    )
+    return {
+        name: (
+            df
+            if name in NATIVE_SEASON_TABLES
+            else df.with_columns(pl.lit(year).cast(pl.Int16).alias("season"))
+        )
+        for name, df in tables.items()
+    }
+
+
+def read_retrosheet_seasons(
+    zips: dict[int, pathlib.Path], years: tuple[int, ...] | None = None
+) -> dict[str, pl.DataFrame]:
+    """Every fixture season, converted and concatenated per table."""
+    years = years or tuple(zips)
+    per_table: dict[str, list[pl.DataFrame]] = {}
+    for year in years:
+        for name, df in read_retrosheet_season(zips[year], year).items():
+            per_table.setdefault(name, []).append(df)
+    return {name: pl.concat(dfs) for name, dfs in per_table.items()}
 
 
 def rewrite_zip(src: pathlib.Path, dst: pathlib.Path, fn) -> pathlib.Path:
