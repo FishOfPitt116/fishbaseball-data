@@ -83,25 +83,27 @@ def _rename(df: pl.DataFrame, table: str, mapping: Mapping[str, str]) -> pl.Data
     return df.rename(dict(mapping))
 
 
-def _cast_expr(col: str, dtype: pl.DataType, strict: bool) -> pl.Expr:
+def _cast_expr(col: str, dtype: pl.DataType, strict: bool, date_format: str) -> pl.Expr:
     if dtype == pl.Date:
-        return pl.col(col).str.to_date("%Y-%m-%d", strict=strict)
+        return pl.col(col).str.to_date(date_format, strict=strict)
     return pl.col(col).cast(dtype, strict=strict)
 
 
-def _cast(df: pl.DataFrame, table: str, dtypes: Mapping[str, pl.DataType]) -> pl.DataFrame:
+def _cast(
+    df: pl.DataFrame, table: str, dtypes: Mapping[str, pl.DataType], date_format: str
+) -> pl.DataFrame:
     problems: list[str] = []
     for col, dtype in dtypes.items():
         if dtype == pl.Utf8:
             continue
-        lax = df.select(_cast_expr(col, dtype, strict=False)).to_series()
+        lax = df.select(_cast_expr(col, dtype, False, date_format)).to_series()
         bad = df.filter(lax.is_null() & df[col].is_not_null())[col]
         if len(bad):
             sample = bad.head(SAMPLE_BAD_VALUES).to_list()
             problems.append(f"{table}.{col} -> {dtype}: {len(bad)} bad value(s), e.g. {sample}")
     if problems:
         raise CastError("cast failures:\n" + "\n".join(problems))
-    return df.with_columns([_cast_expr(c, t, strict=True) for c, t in dtypes.items()]).select(
+    return df.with_columns([_cast_expr(c, t, True, date_format) for c, t in dtypes.items()]).select(
         list(dtypes)
     )
 
@@ -119,10 +121,13 @@ def read_tables(
     primary_keys: Mapping[str, Sequence[str]],
     *,
     normalize_member_name: Callable[[str], str] | None = None,
+    date_format: str = "%Y-%m-%d",
 ) -> dict[str, pl.DataFrame]:
     """Inventory, read (UTF-8, BOM stripped, all Utf8), rename, cast strictly, sort by key.
     `normalize_member_name` is for sources with per-partition-prefixed CSV names; see
-    `_csv_members`. Lahman passes none, so its exact-filename matching is unchanged."""
+    `_csv_members`. `date_format` is Lahman's hyphenated form by default; Retrosheet's `date`
+    columns are `YYYYMMDD` and pass `date_format="%Y%m%d"`. Lahman passes neither, so its
+    behavior is unchanged."""
     with zipfile.ZipFile(zip_path) as zf:
         members = _csv_members(zf, normalize_member_name)
         inventory(list(members), config)
@@ -130,7 +135,9 @@ def read_tables(
         for csv_name, member in sorted(members.items()):
             table = config.tables[csv_name]
             df = _rename(_read_csv(zf.read(member), table), table, config.columns[table])
-            tables[table] = sort_frame(_cast(df, table, dtypes[table]), primary_keys[table])
+            tables[table] = sort_frame(
+                _cast(df, table, dtypes[table], date_format), primary_keys[table]
+            )
     return tables
 
 

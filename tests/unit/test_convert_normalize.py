@@ -3,6 +3,7 @@ prefix every CSV with a key (Retrosheet: the season year, e.g. "2024batting.csv"
 
 import re
 import zipfile
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -76,6 +77,26 @@ def test_normalizer_still_catches_a_missing_table(tmp_path: Path):
     z = make_zip(tmp_path / "2024.zip", {"2024batting.csv": "id,hr\nruthba01,60\n"})
     with pytest.raises(InventoryError, match="people"):
         read_tables(z, CONFIG, DTYPES, PRIMARY_KEYS, normalize_member_name=normalize)
+
+
+def test_date_format_defaults_to_lahmans_hyphenated_form(tmp_path: Path):
+    config = SourceConfig(
+        name="x", page_url="x", version_pattern=re.compile(r"v(\d+)"), download_urls=(),
+        tables={"g.csv": "g"}, columns={"g": {"date": "date"}}, license="x", attribution="x",
+    )  # fmt: skip
+    z = make_zip(tmp_path / "z.zip", {"g.csv": "date\n2024-03-20\n"})
+    tables = read_tables(z, config, {"g": {"date": pl.Date()}}, {"g": ["date"]})
+    assert tables["g"]["date"].to_list() == [date(2024, 3, 20)]
+
+
+def test_date_format_can_be_overridden_for_retrosheets_yyyymmdd(tmp_path: Path):
+    config = SourceConfig(
+        name="x", page_url="x", version_pattern=re.compile(r"v(\d+)"), download_urls=(),
+        tables={"g.csv": "g"}, columns={"g": {"date": "date"}}, license="x", attribution="x",
+    )  # fmt: skip
+    z = make_zip(tmp_path / "z.zip", {"g.csv": "date\n20240320\n"})
+    tables = read_tables(z, config, {"g": {"date": pl.Date()}}, {"g": ["date"]}, date_format="%Y%m%d")
+    assert tables["g"]["date"].to_list() == [date(2024, 3, 20)]
 
 
 def test_normalizer_collision_raises(tmp_path: Path):
