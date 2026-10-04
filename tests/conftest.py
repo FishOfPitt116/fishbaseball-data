@@ -31,32 +31,10 @@ def retrosheet_season_zips(retrosheet_fixtures: pathlib.Path) -> dict[int, pathl
 
 
 def read_retrosheet_season(zip_path: pathlib.Path, year: int) -> dict[str, pl.DataFrame]:
-    """Convert one fixture season zip exactly as the real pipeline will: normalize the
-    year-prefixed member names, cast with Retrosheet's dtypes/date format/null markers, then
-    stamp `season` onto the tables that don't carry it natively."""
-    import re
+    """Convert one fixture season zip exactly as the real pipeline will."""
+    from pipelines.retrosheet.convert import read_season
 
-    from pipelines.core.convert import read_tables
-    from pipelines.retrosheet import RETROSHEET
-    from pipelines.retrosheet.schema import CSV_DTYPES, NATIVE_SEASON_TABLES, PRIMARY_KEYS
-
-    tables = read_tables(
-        zip_path,
-        RETROSHEET,
-        CSV_DTYPES,
-        PRIMARY_KEYS,
-        normalize_member_name=lambda name: re.sub(r"^\d{4}", "", name),
-        date_format="%Y%m%d",
-        null_markers=frozenset({"", "?"}),
-    )
-    return {
-        name: (
-            df
-            if name in NATIVE_SEASON_TABLES
-            else df.with_columns(pl.lit(year).cast(pl.Int16).alias("season"))
-        )
-        for name, df in tables.items()
-    }
+    return read_season(zip_path, str(year))
 
 
 def read_retrosheet_seasons(
