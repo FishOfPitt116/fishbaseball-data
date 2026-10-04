@@ -20,7 +20,11 @@ def _real_headers(zip_path: Path, year: int) -> dict[str, list[str]]:
 def test_retrosheet_config_is_a_source_config():
     assert RETROSHEET.name == "retrosheet"
     assert RETROSHEET.partitions is not None
-    assert RETROSHEET.partitions.partitioned_tables == set(TABLES.values())
+    # game_info and all_players stay single files, like every Lahman table (R4).
+    assert RETROSHEET.partitions.partitioned_tables == {
+        "plays", "batting", "pitching", "fielding", "team_stats",
+    }  # fmt: skip
+    assert RETROSHEET.partitions.partitioned_tables < set(TABLES.values())
 
 
 def test_table_names_are_snake_case_and_unique():

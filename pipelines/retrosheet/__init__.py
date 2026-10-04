@@ -12,10 +12,14 @@ from pipelines.retrosheet.schema import (
 from pipelines.retrosheet.seasons import discover_seasons, season_zip_url
 from pipelines.retrosheet.tables import TABLES
 
+# R4: plays/batting/pitching/fielding/team_stats are big enough to publish one Parquet file
+# per season, reusing unchanged seasons from an older release (see pipelines.core.partitions).
+# game_info and all_players are small enough (~226k and ~131k rows across all of history) to
+# stay single files, rebuilt in full each release — the same shape as every Lahman table.
+PARTITIONED_TABLES = frozenset({"plays", "batting", "pitching", "fielding", "team_stats"})
+
 PARTITIONS = PartitionConfig(
-    discover=discover_seasons,
-    url=season_zip_url,
-    partitioned_tables=frozenset(TABLES.values()),  # every Retrosheet table is per-season
+    discover=discover_seasons, url=season_zip_url, partitioned_tables=PARTITIONED_TABLES
 )
 
 RETROSHEET = SourceConfig(
