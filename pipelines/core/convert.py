@@ -62,7 +62,7 @@ def inventory(names: Sequence[str], config: SourceConfig) -> None:
         )
 
 
-def _read_csv(raw: bytes, table: str) -> pl.DataFrame:
+def _read_csv(raw: bytes, table: str, null_markers: frozenset[str]) -> pl.DataFrame:
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as e:
@@ -70,7 +70,10 @@ def _read_csv(raw: bytes, table: str) -> pl.DataFrame:
     text = text.removeprefix(BOM)
     df = pl.read_csv(io.BytesIO(text.encode("utf-8")), infer_schema=False, encoding="utf8")
     return df.with_columns(
-        [pl.when(pl.col(c) == "").then(None).otherwise(pl.col(c)).alias(c) for c in df.columns]
+        [
+            pl.when(pl.col(c).is_in(list(null_markers))).then(None).otherwise(pl.col(c)).alias(c)
+            for c in df.columns
+        ]
     )
 
 
@@ -122,19 +125,23 @@ def read_tables(
     *,
     normalize_member_name: Callable[[str], str] | None = None,
     date_format: str = "%Y-%m-%d",
+    null_markers: frozenset[str] = frozenset({""}),
 ) -> dict[str, pl.DataFrame]:
     """Inventory, read (UTF-8, BOM stripped, all Utf8), rename, cast strictly, sort by key.
     `normalize_member_name` is for sources with per-partition-prefixed CSV names; see
     `_csv_members`. `date_format` is Lahman's hyphenated form by default; Retrosheet's `date`
-    columns are `YYYYMMDD` and pass `date_format="%Y%m%d"`. Lahman passes neither, so its
-    behavior is unchanged."""
+    columns are `YYYYMMDD` and pass `date_format="%Y%m%d"`. `null_markers` is which raw string
+    values become null before casting; Lahman only has blank, Retrosheet also uses `"?"`.
+    Lahman passes none of these, so its behavior is unchanged."""
     with zipfile.ZipFile(zip_path) as zf:
         members = _csv_members(zf, normalize_member_name)
         inventory(list(members), config)
         tables: dict[str, pl.DataFrame] = {}
         for csv_name, member in sorted(members.items()):
             table = config.tables[csv_name]
-            df = _rename(_read_csv(zf.read(member), table), table, config.columns[table])
+            df = _rename(
+                _read_csv(zf.read(member), table, null_markers), table, config.columns[table]
+            )
             tables[table] = sort_frame(
                 _cast(df, table, dtypes[table], date_format), primary_keys[table]
             )

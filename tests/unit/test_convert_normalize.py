@@ -10,7 +10,7 @@ import polars as pl
 import pytest
 
 from pipelines.core.config import SourceConfig
-from pipelines.core.convert import InventoryError, read_tables
+from pipelines.core.convert import CastError, InventoryError, read_tables
 
 CONFIG = SourceConfig(
     name="x",
@@ -113,3 +113,37 @@ def test_normalizer_collision_raises(tmp_path: Path):
     )
     with pytest.raises(InventoryError, match="duplicate"):
         read_tables(z, CONFIG, DTYPES, PRIMARY_KEYS, normalize_member_name=normalize)
+
+
+def test_extra_null_markers_are_treated_as_null(tmp_path: Path):
+    # "balls" is a plain column, not the primary key, so sort order doesn't reshuffle it
+    config = SourceConfig(
+        name="x",
+        page_url="x",
+        version_pattern=re.compile(r"v(\d+)"),
+        download_urls=(),
+        tables={"g.csv": "g"},
+        columns={"g": {"id": "id", "balls": "balls"}},
+        license="x",
+        attribution="x",
+    )
+    z = make_zip(tmp_path / "z.zip", {"g.csv": "id,balls\n1,3\n2,?\n3,1\n"})
+    tables = read_tables(
+        z,
+        config,
+        {"g": {"id": pl.Utf8(), "balls": pl.Int8()}},
+        {"g": ["id"]},
+        null_markers=frozenset({"", "?"}),
+    )
+    assert tables["g"]["balls"].to_list() == [3, None, 1]
+
+
+def test_default_null_markers_do_not_treat_question_mark_as_null(tmp_path: Path):
+    # Lahman's behavior is unchanged: "?" is just a bad value, not a null marker, by default.
+    config = SourceConfig(
+        name="x", page_url="x", version_pattern=re.compile(r"v(\d+)"), download_urls=(),
+        tables={"g.csv": "g"}, columns={"g": {"balls": "balls"}}, license="x", attribution="x",
+    )  # fmt: skip
+    z = make_zip(tmp_path / "z.zip", {"g.csv": "balls\n3\n?\n1\n"})
+    with pytest.raises(CastError):
+        read_tables(z, config, {"g": {"balls": pl.Int8()}}, {"g": ["balls"]})
