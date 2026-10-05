@@ -56,14 +56,25 @@ def stage_detect(
     session: Any,
     source_url: str | None,
     force: bool,
+    delay: float | None = None,
 ) -> dict[str, Any]:
     """A partitioned source (Retrosheet: per-season zips) has no single upstream version
     string or zip to detect against, so its stages live separately in
-    `pipelines.core.partitioned_pipeline`; `source_url` doesn't apply there and is ignored."""
+    `pipelines.core.partitioned_pipeline`; `source_url` doesn't apply there and is ignored.
+    `delay` (seconds between per-partition requests) is likewise partitioned-only; omitted
+    (None), the partitioned stage's own default applies."""
     if config.partitions is not None:
-        from pipelines.core.partitioned_pipeline import stage_detect as partitioned_detect
+        from pipelines.core.partitioned_pipeline import (
+            DEFAULT_PARTITION_DELAY,
+        )
+        from pipelines.core.partitioned_pipeline import (
+            stage_detect as partitioned_detect,
+        )
 
-        return partitioned_detect(config, out_dir=out_dir, repo=repo, session=session, force=force)
+        return partitioned_detect(
+            config, out_dir=out_dir, repo=repo, session=session, force=force,
+            delay=DEFAULT_PARTITION_DELAY if delay is None else delay,
+        )  # fmt: skip
     try:
         return detect(
             config, out_dir=out_dir, latest_url=latest_url(config, repo), session=session,
@@ -192,12 +203,14 @@ def run_all(
     now: datetime,
     pipeline_version: str,
     full_dataset: bool = True,
+    delay: float | None = None,
 ) -> dict[str, Any]:
     session = session or new_session()
     out_dir.mkdir(parents=True, exist_ok=True)
     found = stage_detect(
-        config, out_dir=out_dir, repo=repo, session=session, source_url=source_url, force=force
-    )
+        config, out_dir=out_dir, repo=repo, session=session, source_url=source_url, force=force,
+        delay=delay,
+    )  # fmt: skip
     if not found["changed"]:
         return {"status": "no_change", "reason": found["reason"]}
     build = stage_build(

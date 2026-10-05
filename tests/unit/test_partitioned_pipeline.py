@@ -153,6 +153,50 @@ def test_force_publishes_even_with_unchanged_etags(env):
     assert second["status"] == "published" and second["tag"] != first["tag"]
 
 
+def test_pipeline_dispatch_forwards_delay_to_partitioned_stage_detect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    import pipelines.core.pipeline as core_pipeline
+
+    captured: dict = {}
+
+    def fake_partitioned_detect(config, **kwargs):
+        captured.update(kwargs)
+        return {
+            "changed": False, "reason": "content_unchanged", "changed_seasons": [],
+            "zip_paths": {}, "upstream_seen": {},
+        }  # fmt: skip
+
+    monkeypatch.setattr("pipelines.core.partitioned_pipeline.stage_detect", fake_partitioned_detect)
+    core_pipeline.stage_detect(
+        RETROSHEET, out_dir=tmp_path, repo=REPO, session=object(), source_url=None,
+        force=False, delay=1.5,
+    )  # fmt: skip
+    assert captured["delay"] == 1.5
+
+
+def test_pipeline_dispatch_uses_the_partitioned_default_when_not_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    import pipelines.core.pipeline as core_pipeline
+    from pipelines.core.partitioned_pipeline import DEFAULT_PARTITION_DELAY
+
+    captured: dict = {}
+
+    def fake_partitioned_detect(config, **kwargs):
+        captured.update(kwargs)
+        return {
+            "changed": False, "reason": "content_unchanged", "changed_seasons": [],
+            "zip_paths": {}, "upstream_seen": {},
+        }  # fmt: skip
+
+    monkeypatch.setattr("pipelines.core.partitioned_pipeline.stage_detect", fake_partitioned_detect)
+    core_pipeline.stage_detect(
+        RETROSHEET, out_dir=tmp_path, repo=REPO, session=object(), source_url=None, force=False
+    )
+    assert captured["delay"] == DEFAULT_PARTITION_DELAY
+
+
 def test_stage_detect_paces_both_checks_and_downloads(
     tmp_path: Path, retrosheet_season_zips: dict[int, Path], monkeypatch: pytest.MonkeyPatch
 ):

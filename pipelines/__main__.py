@@ -1,5 +1,5 @@
 """CLI: python -m pipelines <source> <detect|build|publish|all>
-[--source-url URL] [--force] [--dry-run] [--out DIR]"""
+[--source-url URL] [--force] [--dry-run] [--out DIR] [--delay SECONDS]"""
 
 from __future__ import annotations
 
@@ -42,6 +42,11 @@ def main(
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--out", default="build")
+    ap.add_argument(
+        "--delay", type=float, default=None,
+        help="seconds between per-partition requests (partitioned sources only; "
+        "default set by the stage itself)",
+    )  # fmt: skip
     args = ap.parse_args(argv)
 
     config, schema = SOURCES[args.source]
@@ -57,7 +62,7 @@ def main(
     try:
         if args.command == "detect":
             result: dict[str, Any] = stage_detect(
-                config, source_url=args.source_url, force=args.force, **common
+                config, source_url=args.source_url, force=args.force, delay=args.delay, **common
             )
         elif args.command == "build":
             found = _read_json(out_dir / "detect.json", "detect")
@@ -76,7 +81,7 @@ def main(
             result = run_all(
                 config, schema, client=client, source_url=args.source_url, force=args.force,
                 dry_run=args.dry_run, now=now, pipeline_version=PIPELINE_VERSION,
-                full_dataset=full_dataset, **common,
+                full_dataset=full_dataset, delay=args.delay, **common,
             )  # fmt: skip
     except StageError as e:
         error_file.write_text(json.dumps({"stage": e.stage, "error": str(e)}, indent=2) + "\n")
