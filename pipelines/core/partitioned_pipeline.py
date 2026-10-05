@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,8 @@ from pipelines.core.publish import ReleaseClient, make_notice, publish, record_u
 from pipelines.core.validate import ValidationError
 from pipelines.core.versioning import next_tag
 
+DEFAULT_PARTITION_DELAY = 0.5  # seconds between requests to a small, volunteer-run site
+
 
 def stage_detect(
     config: SourceConfig,
@@ -40,6 +43,7 @@ def stage_detect(
     session: Any,
     force: bool = False,
     only: list[str] | None = None,
+    delay: float = DEFAULT_PARTITION_DELAY,
 ) -> dict[str, Any]:
     assert config.partitions is not None
     try:
@@ -50,11 +54,14 @@ def stage_detect(
             previous_upstream_seen=(previous_latest or {}).get("upstream_seen"),
             user_agent=USER_AGENT,
             only=only,
+            delay=delay,
         )
         decision = decide_partitions(checks, first_release=previous_latest is None, force=force)
         zip_paths: dict[str, str] = {}
         if decision.release:
-            for season in decision.changed_seasons:
+            for i, season in enumerate(decision.changed_seasons):
+                if i and delay:
+                    time.sleep(delay)
                 path, _ = download_partition(
                     config.partitions.url(season), season, out_dir=out_dir / "downloads",
                     session=session, user_agent=USER_AGENT,

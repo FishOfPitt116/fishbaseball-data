@@ -3,11 +3,13 @@ fixture season zips: `run_all` wired through `pipelines.core.pipeline`'s dispatc
 `pipelines.core.partitioned_pipeline` (since `RETROSHEET.partitions is not None`)."""
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+from pipelines.core.partitioned_pipeline import stage_detect
 from pipelines.core.pipeline import run_all
 from pipelines.retrosheet import RETROSHEET, RETROSHEET_SCHEMA
 from pipelines.retrosheet.seasons import DOWNLOADS_PAGE, season_zip_url
@@ -76,7 +78,10 @@ class RetrosheetSession:
 
 
 @pytest.fixture
-def env(tmp_path: Path, retrosheet_season_zips: dict[int, Path]):
+def env(tmp_path: Path, retrosheet_season_zips: dict[int, Path], monkeypatch: pytest.MonkeyPatch):
+    # These tests check business logic (what got built/published), not request pacing — that
+    # has its own dedicated test below — so skip the real delay between requests.
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     store = FakeClient()
     zips = {str(year): path for year, path in retrosheet_season_zips.items()}
     etags = {season: f'"{season}-v1"' for season in zips}
@@ -146,3 +151,21 @@ def test_force_publishes_even_with_unchanged_etags(env):
     first = go()
     second = go(force=True)
     assert second["status"] == "published" and second["tag"] != first["tag"]
+
+
+def test_stage_detect_paces_both_checks_and_downloads(
+    tmp_path: Path, retrosheet_season_zips: dict[int, Path], monkeypatch: pytest.MonkeyPatch
+):
+    store = FakeClient()
+    zips = {str(year): path for year, path in retrosheet_season_zips.items()}
+    etags = {season: f'"{season}-v1"' for season in zips}
+    session = RetrosheetSession(zips, store, etags)
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+
+    result = stage_detect(RETROSHEET, out_dir=tmp_path / "b", repo=REPO, session=session, delay=0.3)
+
+    assert result["changed_seasons"] == ["1927", "1956", "2001"]
+    # 2 pauses checking 3 seasons' ETags + 2 pauses downloading all 3 (first release: none
+    # carried forward) — never a pause before the very first request of either pass.
+    assert sleeps == [0.3] * 4

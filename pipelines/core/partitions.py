@@ -7,6 +7,7 @@ site), so an unchanged partition costs one HEAD request, not a full download.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -90,9 +91,12 @@ def check_all_partitions(
     previous_upstream_seen: dict[str, Any] | None,
     user_agent: str,
     only: list[str] | None = None,
+    delay: float = 0.0,
 ) -> dict[str, PartitionCheck]:
     """Every discoverable partition's check result, keyed by partition key. `only` restricts
-    to specific keys (e.g. a manual rebuild of particular seasons)."""
+    to specific keys (e.g. a manual rebuild of particular seasons). `delay` paces requests
+    (a sleep between each pair, none before the first) so a source with many partitions
+    (Retrosheet: ~129 seasons) doesn't fire them all at a small, volunteer-run site at once."""
     assert config.partitions is not None
     keys = config.partitions.discover(session)
     if only is not None:
@@ -101,13 +105,15 @@ def check_all_partitions(
             raise ValueError(f"unknown partition(s): {unknown}")
         keys = [k for k in keys if k in only]
     seen = previous_upstream_seen or {}
-    return {
-        key: check_partition(
+    results: dict[str, PartitionCheck] = {}
+    for i, key in enumerate(keys):
+        if i and delay:
+            time.sleep(delay)
+        results[key] = check_partition(
             config.partitions.url(key),
             key,
             session=session,
             previous_etag=(seen.get(key) or {}).get("etag"),
             user_agent=user_agent,
         )
-        for key in keys
-    }
+    return results

@@ -195,6 +195,41 @@ def test_check_all_partitions_with_no_prior_history_is_all_changed():
     assert results["2024"].changed is True
 
 
+def test_check_all_partitions_paces_requests_with_delay(monkeypatch):
+    # A small, volunteer-run site shouldn't see ~129 requests land back-to-back: pace them,
+    # one sleep *between* each pair of requests, none before the first.
+    partitions = make_partitions(["2023", "2024", "2025"])
+    s = FakeSession(
+        head_routes={
+            "https://x/2023.zip": HeadResp(200, etag='"a"'),
+            "https://x/2024.zip": HeadResp(200, etag='"b"'),
+            "https://x/2025.zip": HeadResp(200, etag='"c"'),
+        }
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr("pipelines.core.partitions.time.sleep", sleeps.append)
+    check_all_partitions(
+        StubConfig(partitions), session=s, previous_upstream_seen=None, user_agent=UA, delay=0.5
+    )
+    assert sleeps == [0.5, 0.5]
+
+
+def test_check_all_partitions_default_delay_is_zero(monkeypatch):
+    partitions = make_partitions(["2023", "2024"])
+    s = FakeSession(
+        head_routes={
+            "https://x/2023.zip": HeadResp(200, etag='"a"'),
+            "https://x/2024.zip": HeadResp(200, etag='"b"'),
+        }
+    )
+    sleeps: list[float] = []
+    monkeypatch.setattr("pipelines.core.partitions.time.sleep", sleeps.append)
+    check_all_partitions(
+        StubConfig(partitions), session=s, previous_upstream_seen=None, user_agent=UA
+    )
+    assert sleeps == []
+
+
 # ---- decide_partitions -------------------------------------------------------------------
 
 
