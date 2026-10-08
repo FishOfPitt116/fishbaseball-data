@@ -13,8 +13,8 @@ import polars as pl
 from pipelines.core.convert import read_tables
 from pipelines.retrosheet.schema import (
     CSV_DTYPES,
+    CSV_PRIMARY_KEYS,
     NATIVE_SEASON_TABLES,
-    PRIMARY_KEYS,
     SEASON_COLUMN,
 )
 
@@ -33,10 +33,12 @@ def read_season(zip_path: Path, season: str) -> dict[str, pl.DataFrame]:
         zip_path,
         RETROSHEET,
         CSV_DTYPES,
-        PRIMARY_KEYS,
+        CSV_PRIMARY_KEYS,
         normalize_member_name=lambda name: _YEAR_PREFIX.sub("", name),
         date_format="%Y%m%d",
         null_markers=frozenset({"", "?"}),
+        # Confirmed real: 1899's plays.csv lacks 16 columns every other season has.
+        allow_missing_columns=True,
     )
     year = int(season)
     return {

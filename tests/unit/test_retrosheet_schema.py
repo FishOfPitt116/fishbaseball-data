@@ -61,6 +61,21 @@ def test_outs_post_out_of_range_fails(tables):
     assert any("outs_post" in f for f in failures(tables, full_dataset=True))
 
 
+def test_np_event_with_outs_pre_3_does_not_fail(tables):
+    # Confirmed real (2017 ATL game, pn 60): Retrosheet's "NP" (no play) event — e.g. a
+    # substitution logged at the moment the third out ends a half-inning — legitimately
+    # carries outs_pre == outs_post == 3; it isn't a real play and shouldn't be range-checked.
+    tables = dict(tables)
+    plays = tables["plays"]
+    np_row = plays.head(1).with_columns(
+        pl.lit("NP").alias("event"),
+        pl.lit(3).cast(pl.Int8).alias("outs_pre"),
+        pl.lit(3).cast(pl.Int8).alias("outs_post"),
+    )
+    tables["plays"] = pl.concat([plays, np_row])
+    assert not any("outs_pre" in f or "outs_post" in f for f in failures(tables, full_dataset=True))
+
+
 def test_outs_post_less_than_outs_pre_fails(tables):
     tables = dict(tables)
     plays = tables["plays"]
@@ -126,3 +141,24 @@ def test_coverage_missing_team_stats_for_a_season_fails(tables):
     tables = dict(tables)
     tables["team_stats"] = tables["team_stats"].filter(pl.col("season") != 1956)
     assert any("1956" in f for f in failures(tables, full_dataset=True))
+
+
+def test_all_players_same_id_and_team_in_different_seasons_is_not_a_duplicate(tables):
+    # Confirmed real: the same player+team recurs every season they play there (432 shared
+    # (id, team) pairs between just two adjacent real seasons) — `season` must be part of
+    # all_players' primary key, or every multi-season player looks like a PK violation.
+    tables = dict(tables)
+    all_players = tables["all_players"]
+    one = all_players.head(1)
+    other_season = one.with_columns((pl.col("season") + 1).alias("season"))
+    tables["all_players"] = pl.concat([all_players, other_season])
+    assert not any(
+        "all_players" in f and "duplicate" in f for f in failures(tables, full_dataset=True)
+    )
+
+
+def test_all_players_true_duplicate_still_fails(tables):
+    tables = dict(tables)
+    all_players = tables["all_players"]
+    tables["all_players"] = pl.concat([all_players, all_players.head(1)])
+    assert any("all_players" in f and "duplicate" in f for f in failures(tables, full_dataset=True))

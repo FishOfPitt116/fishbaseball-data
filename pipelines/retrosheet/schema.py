@@ -537,12 +537,22 @@ CSV_DTYPES: dict[str, dict[str, pl.DataType]] = {
 
 PRIMARY_KEYS: dict[str, list[str]] = {
     "game_info": ["gid"],
-    "all_players": ["id", "team"],
+    # `season` disambiguates all_players: the same player+team recurs every season they play
+    # there (confirmed real: 432 shared (id, team) pairs between just two adjacent seasons),
+    # unlike every other table here, whose key already includes a globally-unique `gid`.
+    "all_players": ["id", "team", "season"],
     "batting": ["gid", "id", "team", "stattype"],
     "pitching": ["gid", "id", "team", "stattype"],
     "fielding": ["gid", "id", "team", "d_seq", "d_pos", "stattype"],
     "team_stats": ["gid", "team", "stattype"],
     "plays": ["gid", "pn"],
+}
+
+# What `read_tables()` should sort by, before season-stamping: `season` isn't a real CSV
+# column yet (see CSV_DTYPES) and dropping it changes nothing about the resulting row order
+# anyway, since every row from one season's zip already shares the same season.
+CSV_PRIMARY_KEYS: dict[str, list[str]] = {
+    table: [c for c in key if c != SEASON_COLUMN] for table, key in PRIMARY_KEYS.items()
 }
 
 SEASON_COLUMNS: dict[str, str] = {table: SEASON_COLUMN for table in DTYPES}
@@ -617,7 +627,11 @@ def _logic(tables: dict[str, pl.DataFrame]) -> list[str]:
     out: list[str] = []
     plays = tables.get("plays")
     if plays is not None:
-        if plays.filter(~pl.col("outs_pre").is_in([0, 1, 2])).height:
+        # "NP" ("no play") rows aren't a real play — e.g. a substitution logged at the moment
+        # a half-inning's third out is recorded — and legitimately carry outs_pre == 3
+        # (confirmed real: 43 such rows across decades of real seasons, including postseason).
+        real_plays = plays.filter(pl.col("event") != "NP")
+        if real_plays.filter(~pl.col("outs_pre").is_in([0, 1, 2])).height:
             out.append("plays: outs_pre outside {0,1,2}")
         if plays.filter(~pl.col("outs_post").is_in([0, 1, 2, 3])).height:
             out.append("plays: outs_post outside {0,1,2,3}")

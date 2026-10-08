@@ -99,6 +99,57 @@ def test_missing_column_fails(tmp_path: Path, small_zip: Path):
         load(z)
 
 
+def test_missing_column_is_null_filled_when_allowed(tmp_path: Path, small_zip: Path):
+    # Real upstream data can drop a column for just one partition (Retrosheet's 1899 plays.csv
+    # lacks 16 columns every other season has) without it being an error worth blocking a whole
+    # release over; `allow_missing_columns` opts into filling it null instead of raising.
+    def fn(name, text):
+        if name != "Batting.csv":
+            return text
+        rows = [r.rsplit(",", 1)[0] for r in text.splitlines()]  # drop GIDP
+        return "\n".join(rows) + "\n"
+
+    z = rewrite_zip(small_zip, tmp_path / "z.zip", fn)
+    tables = read_tables(z, LAHMAN, DTYPES, PRIMARY_KEYS, allow_missing_columns=True)
+    assert tables["batting"]["gidp"].dtype == pl.Int32
+    assert tables["batting"]["gidp"].null_count() == tables["batting"].height
+
+
+def test_unmapped_column_still_fails_when_missing_is_allowed(tmp_path: Path, small_zip: Path):
+    # Leniency only ever applies to a column the schema expects but the CSV lacks; a column
+    # the CSV has that the schema doesn't know about is still unambiguously worth stopping for.
+    def fn(name, text):
+        if name != "Batting.csv":
+            return text
+        head, *rows = text.splitlines()
+        return "\n".join([head + ",newCol"] + [r + ",x" for r in rows]) + "\n"
+
+    z = rewrite_zip(small_zip, tmp_path / "z.zip", fn)
+    with pytest.raises(ConvertError, match="batting.*newCol"):
+        read_tables(z, LAHMAN, DTYPES, PRIMARY_KEYS, allow_missing_columns=True)
+
+
+def test_stray_whitespace_around_a_value_does_not_fail_the_cast(tmp_path: Path, small_zip: Path):
+    # Confirmed real: Retrosheet's 1976 game_info has a windspeed value of "17 " (trailing
+    # space) for one game — clearly just incidental CSV formatting, not a bad value.
+    def fn(name, text):
+        return (
+            text.replace(
+                "ruthba01,1927,1,NYA,AL,151,540,158,192,29,8,60,",
+                "ruthba01,1927,1,NYA,AL,151,540,158,192,29,8, 60 ,",
+            )
+            if name == "Batting.csv"
+            else text
+        )
+
+    z = rewrite_zip(small_zip, tmp_path / "z.zip", fn)
+    tables = load(z)
+    row = tables["batting"].filter(
+        (pl.col("player_id") == "ruthba01") & (pl.col("year_id") == 1927)
+    )
+    assert row["hr"].to_list() == [60]
+
+
 def test_bad_cast_reports_table_column_and_value(tmp_path: Path, small_zip: Path):
     def fn(name, text):
         return (

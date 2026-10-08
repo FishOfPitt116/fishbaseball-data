@@ -63,12 +63,16 @@ def inventory(names: Sequence[str], config: SourceConfig) -> None:
 
 
 def _read_csv(raw: bytes, table: str, null_markers: frozenset[str]) -> pl.DataFrame:
+    """Incidental leading/trailing whitespace (confirmed real: Retrosheet's 1976 `game_info`
+    has a `windspeed` of "17 " for one game) is stripped before null-marker/cast handling —
+    it's never semantically significant in this upstream data, only ever a formatting slip."""
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as e:
         raise ConvertError(f"{table}: not valid UTF-8: {e}") from e
     text = text.removeprefix(BOM)
     df = pl.read_csv(io.BytesIO(text.encode("utf-8")), infer_schema=False, encoding="utf8")
+    df = df.with_columns([pl.col(c).str.strip_chars() for c in df.columns])
     return df.with_columns(
         [
             pl.when(pl.col(c).is_in(list(null_markers))).then(None).otherwise(pl.col(c)).alias(c)
@@ -77,12 +81,16 @@ def _read_csv(raw: bytes, table: str, null_markers: frozenset[str]) -> pl.DataFr
     )
 
 
-def _rename(df: pl.DataFrame, table: str, mapping: Mapping[str, str]) -> pl.DataFrame:
+def _rename(
+    df: pl.DataFrame, table: str, mapping: Mapping[str, str], *, allow_missing: bool = False
+) -> pl.DataFrame:
     cols = set(df.columns)
     if unmapped := sorted(cols - set(mapping)):
         raise ConvertError(f"{table}: unmapped column(s) {unmapped}: add to columns.py")
     if absent := sorted(set(mapping) - cols):
-        raise ConvertError(f"{table}: column(s) {absent} missing from the CSV")
+        if not allow_missing:
+            raise ConvertError(f"{table}: column(s) {absent} missing from the CSV")
+        df = df.with_columns([pl.lit(None, dtype=pl.Utf8).alias(c) for c in absent])
     return df.rename(dict(mapping))
 
 
@@ -126,12 +134,16 @@ def read_tables(
     normalize_member_name: Callable[[str], str] | None = None,
     date_format: str = "%Y-%m-%d",
     null_markers: frozenset[str] = frozenset({""}),
+    allow_missing_columns: bool = False,
 ) -> dict[str, pl.DataFrame]:
     """Inventory, read (UTF-8, BOM stripped, all Utf8), rename, cast strictly, sort by key.
     `normalize_member_name` is for sources with per-partition-prefixed CSV names; see
     `_csv_members`. `date_format` is Lahman's hyphenated form by default; Retrosheet's `date`
     columns are `YYYYMMDD` and pass `date_format="%Y%m%d"`. `null_markers` is which raw string
     values become null before casting; Lahman only has blank, Retrosheet also uses `"?"`.
+    `allow_missing_columns` null-fills a column the schema expects but one partition's CSV
+    lacks (confirmed real: Retrosheet's 1899 `plays.csv` is missing 16 columns every other
+    season has) instead of raising — an unexpected *extra* column is always still an error.
     Lahman passes none of these, so its behavior is unchanged."""
     with zipfile.ZipFile(zip_path) as zf:
         members = _csv_members(zf, normalize_member_name)
@@ -140,8 +152,9 @@ def read_tables(
         for csv_name, member in sorted(members.items()):
             table = config.tables[csv_name]
             df = _rename(
-                _read_csv(zf.read(member), table, null_markers), table, config.columns[table]
-            )
+                _read_csv(zf.read(member), table, null_markers), table, config.columns[table],
+                allow_missing=allow_missing_columns,
+            )  # fmt: skip
             tables[table] = sort_frame(
                 _cast(df, table, dtypes[table], date_format), primary_keys[table]
             )
