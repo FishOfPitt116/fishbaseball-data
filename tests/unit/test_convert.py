@@ -8,6 +8,7 @@ from pipelines.core.convert import (
     ConvertError,
     InventoryError,
     content_hash,
+    dedupe_most_complete,
     read_tables,
     write_parquet,
 )
@@ -194,3 +195,32 @@ def test_content_hash_ignores_row_order(small_zip: Path):
     assert content_hash(b, PRIMARY_KEYS["batting"]) == content_hash(
         b.reverse(), PRIMARY_KEYS["batting"]
     )
+
+
+def test_dedupe_keeps_the_row_with_fewer_nulls():
+    # Confirmed real: Retrosheet's Negro Leagues-era data occasionally has two rows for the
+    # same key, apparently merged from two slightly-disagreeing historical sources — one
+    # sparser than the other (e.g. blank b_pa/b_ab vs. real values for the same play).
+    df = pl.DataFrame(
+        {
+            "gid": ["G1", "G1", "G2"],
+            "id": ["p1", "p1", "p2"],
+            "pa": [None, 1, 1],
+            "ab": [None, 1, 1],
+        }
+    )
+    out = dedupe_most_complete(df, ["gid", "id"])
+    assert out.height == 2
+    assert out.filter(pl.col("gid") == "G1")["pa"].to_list() == [1]
+
+
+def test_dedupe_is_a_no_op_without_duplicate_keys():
+    df = pl.DataFrame({"gid": ["G1", "G2"], "id": ["p1", "p2"], "pa": [None, 1]})
+    out = dedupe_most_complete(df, ["gid", "id"])
+    assert out.sort("gid").equals(df.sort("gid"))
+
+
+def test_dedupe_breaks_an_exact_tie_deterministically():
+    df = pl.DataFrame({"gid": ["G1", "G1"], "id": ["p1", "p1"], "pa": [1, 1]})
+    out = dedupe_most_complete(df, ["gid", "id"])
+    assert out.height == 1 and out["pa"].to_list() == [1]

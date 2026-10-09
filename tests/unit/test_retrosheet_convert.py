@@ -45,3 +45,41 @@ def test_a_season_missing_a_column_is_null_filled_not_rejected(
     assert "balls" in tables["plays"].columns
     assert tables["plays"]["balls"].dtype == pl.Int8
     assert tables["plays"]["balls"].null_count() == tables["plays"].height
+
+
+def test_a_season_with_a_duplicate_key_keeps_the_more_complete_row(
+    tmp_path: Path, retrosheet_season_zips
+):
+    # Confirmed real: Retrosheet's Negro Leagues-era batting/plays/all_players data has 206
+    # duplicate-key row pairs (1899, 1933-1945), apparently merged from two disagreeing
+    # historical sources — one sparser than the other for the same key.
+    import csv
+    import io
+
+    def duplicate_first_row_with_a_blank_stat(name: str, text: str) -> str:
+        if name != "1927batting.csv":
+            return text
+        reader = csv.reader(io.StringIO(text))
+        rows = list(reader)
+        header, first = rows[0], list(rows[1])
+        sparse = list(first)
+        sparse[header.index("b_h")] = ""  # the complete original row has a real b_h value
+        out = io.StringIO()
+        csv.writer(out).writerows([header, first, sparse, *rows[2:]])
+        return out.getvalue()
+
+    z = rewrite_zip(
+        retrosheet_season_zips[1927],
+        tmp_path / "dup_key.zip",
+        duplicate_first_row_with_a_blank_stat,
+    )
+    tables = read_season(z, "1927")
+    batting = tables["batting"]
+    matches = batting.filter(
+        (pl.col("gid") == "BSN192704120")
+        & (pl.col("id") == "statj101")
+        & (pl.col("team") == "BRO")
+        & (pl.col("stattype") == "value")
+    )
+    assert matches.height == 1
+    assert matches["b_h"].null_count() == 0

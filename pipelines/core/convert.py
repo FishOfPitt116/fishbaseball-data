@@ -125,6 +125,21 @@ def sort_frame(df: pl.DataFrame, primary_key: Sequence[str]) -> pl.DataFrame:
     return df.sort([*primary_key, *rest], nulls_last=True)
 
 
+def dedupe_most_complete(df: pl.DataFrame, primary_key: Sequence[str]) -> pl.DataFrame:
+    """When the same primary key appears more than once (confirmed real: Retrosheet's Negro
+    Leagues-era data occasionally merges two slightly-disagreeing historical sources for one
+    row), keep whichever duplicate has the fewest nulls across its other columns, and drop
+    the rest. A frame with no duplicate keys is returned unchanged (just re-sorted)."""
+    other = [c for c in df.columns if c not in primary_key]
+    n_filled = pl.sum_horizontal([pl.col(c).is_not_null().cast(pl.Int32) for c in other])
+    return (
+        df.with_columns(n_filled.alias("_n_filled"))
+        .sort("_n_filled", descending=True, maintain_order=True)
+        .unique(subset=list(primary_key), keep="first", maintain_order=True)
+        .drop("_n_filled")
+    )
+
+
 def read_tables(
     zip_path: Path,
     config: SourceConfig,

@@ -10,11 +10,12 @@ from pathlib import Path
 
 import polars as pl
 
-from pipelines.core.convert import read_tables
+from pipelines.core.convert import dedupe_most_complete, read_tables
 from pipelines.retrosheet.schema import (
     CSV_DTYPES,
     CSV_PRIMARY_KEYS,
     NATIVE_SEASON_TABLES,
+    PRIMARY_KEYS,
     SEASON_COLUMN,
 )
 
@@ -41,7 +42,7 @@ def read_season(zip_path: Path, season: str) -> dict[str, pl.DataFrame]:
         allow_missing_columns=True,
     )
     year = int(season)
-    return {
+    stamped = {
         name: (
             df
             if name in NATIVE_SEASON_TABLES
@@ -49,3 +50,6 @@ def read_season(zip_path: Path, season: str) -> dict[str, pl.DataFrame]:
         )
         for name, df in tables.items()
     }
+    # Confirmed real: Retrosheet's Negro Leagues-era data has 206 duplicate-key row pairs
+    # (1899, 1933-1945), apparently merged from two disagreeing historical sources.
+    return {name: dedupe_most_complete(df, PRIMARY_KEYS[name]) for name, df in stamped.items()}
