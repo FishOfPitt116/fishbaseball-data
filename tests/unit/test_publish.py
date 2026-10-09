@@ -286,6 +286,39 @@ def test_gh_client_builds_commands(tmp_path: Path):
     assert any("gh release list" in s for s in flat)
 
 
+def test_gh_client_streams_upload_output_but_captures_list_output(tmp_path: Path):
+    # A hosted CI runner will cancel a step that produces no output for a long stretch
+    # (confirmed real: a ~19 minute silent "Run pipeline" step was killed by the platform).
+    # Uploading hundreds of assets in one `gh release create`/`upload` call must stream
+    # straight to the real terminal/log, not sit buffered in `capture_output=True`; calls
+    # that need to parse `.stdout` (existing_tags, fetch) must still capture it.
+    captured_kwargs = []
+
+    def fake_run(cmd, **kw):
+        captured_kwargs.append(kw)
+
+        class R:
+            stdout = "[]"
+            returncode = 0
+
+        return R()
+
+    c = GhClient(REPO, run=fake_run)
+    f = tmp_path / "a.parquet"
+    f.write_bytes(b"x")
+    captured_kwargs.clear()
+    c.create_release("t1", "Title", "notes", [f], latest=False)
+    assert captured_kwargs[-1].get("capture_output") is not True
+
+    captured_kwargs.clear()
+    c.upload_asset("lahman-latest", f, clobber=True)
+    assert captured_kwargs[-1].get("capture_output") is not True
+
+    captured_kwargs.clear()
+    c.existing_tags()
+    assert captured_kwargs[-1].get("capture_output") is True
+
+
 def test_release_and_pointer_titles_are_their_tags(ctx):
     client = FakeClient()
     plan = run(ctx, client)

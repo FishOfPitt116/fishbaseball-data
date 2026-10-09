@@ -34,11 +34,19 @@ class GhClient:
     def __init__(self, repo: str, run: Callable[..., Any] = subprocess.run):
         self.repo, self._run = repo, run
 
-    def _gh(self, *args: str, check: bool = True) -> Any:
-        return self._run(["gh", *args, "--repo", self.repo], capture_output=True, check=check)
+    def _gh(self, *args: str, check: bool = True, capture: bool = False) -> Any:
+        """`capture=False` (the default) lets `gh`'s own output stream straight to the real
+        terminal/CI log as it happens — essential for `create_release`/`upload_asset`, which
+        can run for many minutes uploading hundreds of assets: a hosted CI runner has been
+        observed to cancel a step that produces no output for that long (confirmed real: a
+        ~19 minute silent step was killed by the platform). Only the two calls that actually
+        parse `.stdout` (`existing_tags`, `fetch`) pass `capture=True`."""
+        return self._run(["gh", *args, "--repo", self.repo], capture_output=capture, check=check)
 
     def existing_tags(self) -> list[str]:
-        out = self._gh("release", "list", "--limit", "1000", "--json", "tagName").stdout
+        out = self._gh(
+            "release", "list", "--limit", "1000", "--json", "tagName", capture=True
+        ).stdout
         return [r["tagName"] for r in json.loads(out)]
 
     def create_release(
@@ -57,7 +65,9 @@ class GhClient:
         self._gh("release", "upload", tag, str(path), *(["--clobber"] if clobber else []))
 
     def fetch(self, tag: str, filename: str) -> bytes:
-        out = self._gh("release", "download", tag, "--pattern", filename, "--output", "-").stdout
+        out = self._gh(
+            "release", "download", tag, "--pattern", filename, "--output", "-", capture=True
+        ).stdout
         return out if isinstance(out, bytes) else out.encode()
 
 

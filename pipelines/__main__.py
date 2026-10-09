@@ -27,6 +27,13 @@ def _read_json(path: Path, needs: str) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
+def _print_progress(message: str) -> None:
+    # `flush=True`: a hosted CI runner has been observed cancelling a step that produces no
+    # output for a long stretch (confirmed real: ~19 minutes checking/downloading ~129
+    # Retrosheet seasons), so each line must reach the log immediately, not sit buffered.
+    print(message, flush=True)
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -57,7 +64,9 @@ def main(
     now = now or datetime.now(timezone.utc)
     if client is None and not args.dry_run:
         client = GhClient(repo)
-    common: dict[str, Any] = {"out_dir": out_dir, "repo": repo, "session": session}
+    common: dict[str, Any] = {
+        "out_dir": out_dir, "repo": repo, "session": session, "progress": _print_progress,
+    }  # fmt: skip
     error_file = out_dir / "error.json"
     try:
         if args.command == "detect":

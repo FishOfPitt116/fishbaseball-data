@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -57,12 +58,14 @@ def stage_detect(
     source_url: str | None,
     force: bool,
     delay: float | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """A partitioned source (Retrosheet: per-season zips) has no single upstream version
     string or zip to detect against, so its stages live separately in
     `pipelines.core.partitioned_pipeline`; `source_url` doesn't apply there and is ignored.
     `delay` (seconds between per-partition requests) is likewise partitioned-only; omitted
-    (None), the partitioned stage's own default applies."""
+    (None), the partitioned stage's own default applies. `progress`, if given, is only used
+    there too — Lahman's single-zip detect is fast enough not to need it."""
     if config.partitions is not None:
         from pipelines.core.partitioned_pipeline import (
             DEFAULT_PARTITION_DELAY,
@@ -73,7 +76,7 @@ def stage_detect(
 
         return partitioned_detect(
             config, out_dir=out_dir, repo=repo, session=session, force=force,
-            delay=DEFAULT_PARTITION_DELAY if delay is None else delay,
+            delay=DEFAULT_PARTITION_DELAY if delay is None else delay, progress=progress,
         )  # fmt: skip
     try:
         return detect(
@@ -97,6 +100,7 @@ def stage_build(
     pipeline_version: str,
     full_dataset: bool,
     force: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Convert, validate, write Parquet + manifest. Returns build.json's content."""
     if config.partitions is not None:
@@ -104,7 +108,7 @@ def stage_build(
 
         return partitioned_build(
             config, schema, out_dir=out_dir, repo=repo, session=session, client=client,
-            found=found, now=now, pipeline_version=pipeline_version,
+            found=found, now=now, pipeline_version=pipeline_version, progress=progress,
         )  # fmt: skip
     try:
         previous_latest = fetch_latest(latest_url(config, repo), session)
@@ -158,13 +162,14 @@ def stage_publish(
     build: dict[str, Any],
     dry_run: bool,
     now: datetime,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     if config.partitions is not None:
         from pipelines.core.partitioned_pipeline import stage_publish as partitioned_publish
 
         return partitioned_publish(
             config, out_dir=out_dir, repo=repo, session=session, client=client, found=found,
-            build=build, dry_run=dry_run, now=now,
+            build=build, dry_run=dry_run, now=now, progress=progress,
         )  # fmt: skip
     try:
         previous_latest = fetch_latest(latest_url(config, repo), session)
@@ -204,20 +209,22 @@ def run_all(
     pipeline_version: str,
     full_dataset: bool = True,
     delay: float | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     session = session or new_session()
     out_dir.mkdir(parents=True, exist_ok=True)
     found = stage_detect(
         config, out_dir=out_dir, repo=repo, session=session, source_url=source_url, force=force,
-        delay=delay,
+        delay=delay, progress=progress,
     )  # fmt: skip
     if not found["changed"]:
         return {"status": "no_change", "reason": found["reason"]}
     build = stage_build(
         config, schema, out_dir=out_dir, repo=repo, session=session, client=client, found=found,
         now=now, pipeline_version=pipeline_version, full_dataset=full_dataset, force=force,
+        progress=progress,
     )  # fmt: skip
     return stage_publish(
         config, out_dir=out_dir, repo=repo, session=session, client=client, found=found,
-        build=build, dry_run=dry_run, now=now,
+        build=build, dry_run=dry_run, now=now, progress=progress,
     )  # fmt: skip

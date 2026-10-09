@@ -8,6 +8,7 @@ site), so an unchanged partition costs one HEAD request, not a full download.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -92,11 +93,14 @@ def check_all_partitions(
     user_agent: str,
     only: list[str] | None = None,
     delay: float = 0.0,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, PartitionCheck]:
     """Every discoverable partition's check result, keyed by partition key. `only` restricts
     to specific keys (e.g. a manual rebuild of particular seasons). `delay` paces requests
     (a sleep between each pair, none before the first) so a source with many partitions
-    (Retrosheet: ~129 seasons) doesn't fire them all at a small, volunteer-run site at once."""
+    (Retrosheet: ~129 seasons) doesn't fire them all at a small, volunteer-run site at once.
+    `progress`, if given, is called once per key — a long silent stretch checking ~129
+    partitions sequentially has been observed getting a CI step cancelled by the platform."""
     assert config.partitions is not None
     keys = config.partitions.discover(session)
     if only is not None:
@@ -116,4 +120,6 @@ def check_all_partitions(
             previous_etag=(seen.get(key) or {}).get("etag"),
             user_agent=user_agent,
         )
+        if progress:
+            progress(f"checked {key}: {'changed' if results[key].changed else 'unchanged'}")
     return results

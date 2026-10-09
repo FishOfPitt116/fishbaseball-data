@@ -17,6 +17,7 @@ import io
 import json
 import shutil
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -44,7 +45,11 @@ def stage_detect(
     force: bool = False,
     only: list[str] | None = None,
     delay: float = DEFAULT_PARTITION_DELAY,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    """`progress`, if given, is called repeatedly through both the ETag-check pass and the
+    download pass — confirmed real: a CI step that produced no output for ~19 minutes while
+    checking/downloading ~129 seasons sequentially was cancelled by the platform."""
     assert config.partitions is not None
     try:
         previous_latest = fetch_latest(latest_url(config, repo), session)
@@ -55,6 +60,7 @@ def stage_detect(
             user_agent=USER_AGENT,
             only=only,
             delay=delay,
+            progress=progress,
         )
         decision = decide_partitions(checks, first_release=previous_latest is None, force=force)
         zip_paths: dict[str, str] = {}
@@ -67,6 +73,8 @@ def stage_detect(
                     session=session, user_agent=USER_AGENT,
                 )  # fmt: skip
                 zip_paths[season] = str(path)
+                if progress:
+                    progress(f"downloaded {season}")
         result = {
             "changed": decision.release,
             "reason": decision.reason,
@@ -119,6 +127,7 @@ def stage_build(
     found: dict[str, Any],
     now: datetime,
     pipeline_version: str,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Convert only the changed seasons, validate just that slice (a self-consistent subset
     of a season or few — golden checks that assume the full history is skipped unless this
@@ -140,6 +149,8 @@ def stage_build(
             zip_path = Path(found["zip_paths"][season])
             for name, df in config.partitions.convert(zip_path, season).items():
                 fresh_by_table.setdefault(name, {})[season] = df
+            if progress:
+                progress(f"converted {season}")
 
         # A forced release with no actually-changed seasons (e.g. to carry a pipeline-version
         # bump out) converts nothing fresh; there's nothing new to validate — every carried-
@@ -169,6 +180,8 @@ def stage_build(
         existing = client.existing_tags() if client is not None else []
         tag = next_tag(config.name, now.date(), existing)
         upstream = {"version": now.date().isoformat(), "page_url": config.page_url}
+        if progress:
+            progress(f"writing manifest for {len(fresh_by_table)} table(s)")
         manifest = build_partitioned_manifest(
             config, tag=tag, repo=repo, upstream=upstream,
             unpartitioned_tables=unpartitioned_tables, partitioned_tables_fresh=partitioned_fresh,
@@ -196,6 +209,7 @@ def stage_publish(
     build: dict[str, Any],
     dry_run: bool,
     now: datetime,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     try:
         previous_latest = fetch_latest(latest_url(config, repo), session)
@@ -205,6 +219,8 @@ def stage_publish(
                 record_upstream_seen(client, config.name, previous_latest, seen, now, out_dir)
             return {"status": "content_unchanged", "reason": build["reason"]}
         manifest = json.loads((out_dir / "manifest.json").read_text())
+        if progress:
+            progress(f"publishing {build['tag']} ({len(manifest['tables'])} table(s))")
         plan = publish(
             client, config=config, manifest=manifest, build_dir=out_dir, zip_path=None,
             previous_latest=previous_latest, dry_run=dry_run, now=now,

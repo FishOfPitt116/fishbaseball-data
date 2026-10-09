@@ -213,3 +213,23 @@ def test_stage_detect_paces_both_checks_and_downloads(
     # 2 pauses checking 3 seasons' ETags + 2 pauses downloading all 3 (first release: none
     # carried forward) — never a pause before the very first request of either pass.
     assert sleeps == [0.3] * 4
+
+
+def test_stage_detect_reports_progress_through_checking_and_downloading(
+    tmp_path: Path, retrosheet_season_zips: dict[int, Path], monkeypatch: pytest.MonkeyPatch
+):
+    # Confirmed real: a CI step silent for ~19 minutes while detect ran got cancelled by the
+    # platform. A progress callback must cover both the check pass and the download pass.
+    store = FakeClient()
+    zips = {str(year): path for year, path in retrosheet_season_zips.items()}
+    etags = {season: f'"{season}-v1"' for season in zips}
+    session = RetrosheetSession(zips, store, etags)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    seen: list[str] = []
+
+    stage_detect(
+        RETROSHEET, out_dir=tmp_path / "b", repo=REPO, session=session, progress=seen.append
+    )
+
+    assert any("checked" in m and "1927" in m for m in seen)
+    assert any("download" in m.lower() and "1927" in m for m in seen)

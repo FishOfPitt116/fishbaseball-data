@@ -214,6 +214,25 @@ def test_check_all_partitions_paces_requests_with_delay(monkeypatch):
     assert sleeps == [0.5, 0.5]
 
 
+def test_check_all_partitions_reports_progress_per_key():
+    # Confirmed real: a CI step that produces no output for ~19 minutes while checking ~129
+    # seasons sequentially got cancelled by the platform. A progress callback keeps it visibly
+    # alive regardless of how many partitions there are.
+    partitions = make_partitions(["2023", "2024"])
+    s = FakeSession(
+        head_routes={
+            "https://x/2023.zip": HeadResp(304),
+            "https://x/2024.zip": HeadResp(200, etag='"b"'),
+        }
+    )
+    seen: list[str] = []
+    check_all_partitions(
+        StubConfig(partitions), session=s, previous_upstream_seen={"2023": {"etag": '"a"'}},
+        user_agent=UA, progress=seen.append,
+    )  # fmt: skip
+    assert seen == ["checked 2023: unchanged", "checked 2024: changed"]
+
+
 def test_check_all_partitions_default_delay_is_zero(monkeypatch):
     partitions = make_partitions(["2023", "2024"])
     s = FakeSession(
