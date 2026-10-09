@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from pipelines.core.partitioned_pipeline import stage_detect
+from pipelines.core.partitioned_pipeline import stage_build, stage_detect
 from pipelines.core.pipeline import run_all
 from pipelines.retrosheet import RETROSHEET, RETROSHEET_SCHEMA
 from pipelines.retrosheet.seasons import DOWNLOADS_PAGE, season_zip_url
@@ -233,3 +233,33 @@ def test_stage_detect_reports_progress_through_checking_and_downloading(
 
     assert any("checked" in m and "1927" in m for m in seen)
     assert any("download" in m.lower() and "1927" in m for m in seen)
+
+
+def test_stage_build_reports_progress_before_and_after_each_season(
+    tmp_path: Path, retrosheet_season_zips: dict[int, Path]
+):
+    # Confirmed real: two CI runs hung inside this exact loop (right after converting one
+    # season, before the next) with no way to tell whether the hang was starting the next
+    # season's conversion or finishing it. A "before" line in addition to the existing
+    # "after" line pins that down precisely on the next real run.
+    found = {
+        "changed_seasons": ["1927", "1956", "2001"],
+        "reason": "first_release",
+        "zip_paths": {
+            "1927": str(retrosheet_season_zips[1927]),
+            "1956": str(retrosheet_season_zips[1956]),
+            "2001": str(retrosheet_season_zips[2001]),
+        },
+    }
+    session = RetrosheetSession({}, FakeClient(), {})  # fetch_latest 404s: no previous release
+    seen: list[str] = []
+
+    stage_build(
+        RETROSHEET, RETROSHEET_SCHEMA, out_dir=tmp_path / "b", repo=REPO, session=session,
+        client=None, found=found, now=NOW, pipeline_version="0.1.0", progress=seen.append,
+    )  # fmt: skip
+
+    for season in ("1927", "1956", "2001"):
+        before = next(i for i, m in enumerate(seen) if "converting" in m and season in m)
+        after = next(i for i, m in enumerate(seen) if m == f"converted {season}")
+        assert before < after

@@ -146,6 +146,8 @@ def stage_build(
 
         fresh_by_table: dict[str, dict[str, pl.DataFrame]] = {}
         for season in changed_seasons:
+            if progress:
+                progress(f"converting {season}...")
             zip_path = Path(found["zip_paths"][season])
             for name, df in config.partitions.convert(zip_path, season).items():
                 fresh_by_table.setdefault(name, {})[season] = df
