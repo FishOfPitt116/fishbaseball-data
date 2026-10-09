@@ -162,3 +162,17 @@ def test_all_players_true_duplicate_still_fails(tables):
     all_players = tables["all_players"]
     tables["all_players"] = pl.concat([all_players, all_players.head(1)])
     assert any("all_players" in f and "duplicate" in f for f in failures(tables, full_dataset=True))
+
+
+def test_validate_reports_progress_through_every_check(tables):
+    # Confirmed real: validating the full ~30M-row history is slow enough on a constrained CI
+    # runner (~100s locally; much worse on a 2-core hosted runner) that a CI step silent
+    # through this one call got cancelled by the platform for producing no output.
+    seen: list[str] = []
+    validate(dict(tables), full_dataset=True, progress=seen.append)
+    joined = " ".join(seen)
+    for name in ("keys", "referential", "logic", "golden", "coverage"):
+        assert name in joined, f"no progress message mentioned {name!r}: {seen}"
+    # the two biggest, most expensive checks loop per table — each table should get its own
+    # checkpoint so a slow table doesn't produce one giant silent block anyway.
+    assert sum(1 for m in seen if "keys" in m) >= len(tables)

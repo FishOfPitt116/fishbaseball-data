@@ -156,10 +156,14 @@ def stage_build(
         # bump out) converts nothing fresh; there's nothing new to validate — every carried-
         # forward row was already validated when it was first built.
         if changed_seasons:
+            if progress:
+                progress("concatenating converted seasons")
             season_scoped = {
                 name: pl.concat(list(d.values())) for name, d in fresh_by_table.items()
             }
-            failures = schema.validate(season_scoped, full_dataset=previous is None)
+            failures = schema.validate(
+                season_scoped, full_dataset=previous is None, progress=progress
+            )
             if failures:
                 raise ValidationError(failures)
 

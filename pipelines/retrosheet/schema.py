@@ -16,6 +16,8 @@ any other blank). None of this repo's 27 Lahman tables are affected by anything 
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import polars as pl
 
 SCHEMA_VERSION = 1
@@ -596,19 +598,24 @@ def _structure(tables: dict[str, pl.DataFrame]) -> list[str]:
     return out
 
 
-def _keys(tables: dict[str, pl.DataFrame]) -> list[str]:
+def _keys(
+    tables: dict[str, pl.DataFrame], *, progress: Callable[[str], None] | None = None
+) -> list[str]:
     out: list[str] = []
     for name, df in tables.items():
         key = PRIMARY_KEYS.get(name)
-        if not key or not set(key) <= set(df.columns):
-            continue
-        dups = df.height - df.unique(subset=key).height
-        if dups:
-            out.append(f"{name}: {dups} duplicate row(s) on primary key {key}")
+        if key and set(key) <= set(df.columns):
+            dups = df.height - df.unique(subset=key).height
+            if dups:
+                out.append(f"{name}: {dups} duplicate row(s) on primary key {key}")
+        if progress:
+            progress(f"keys: checked {name}")
     return out
 
 
-def _referential(tables: dict[str, pl.DataFrame]) -> list[str]:
+def _referential(
+    tables: dict[str, pl.DataFrame], *, progress: Callable[[str], None] | None = None
+) -> list[str]:
     out: list[str] = []
     game_info = tables.get("game_info")
     if game_info is None:
@@ -620,6 +627,8 @@ def _referential(tables: dict[str, pl.DataFrame]) -> list[str]:
         bad = _orphans(df, "gid", game_info, "gid")
         if bad:
             out.append(f"{name}: {len(bad)} orphan gid(s) not in game_info, e.g. {bad[:5]}")
+        if progress:
+            progress(f"referential: checked {name}")
     return out
 
 
@@ -693,18 +702,33 @@ def _coverage(tables: dict[str, pl.DataFrame]) -> list[str]:
     return out
 
 
-def validate(tables: dict[str, pl.DataFrame], *, full_dataset: bool = True) -> list[str]:
+def validate(
+    tables: dict[str, pl.DataFrame],
+    *,
+    full_dataset: bool = True,
+    progress: Callable[[str], None] | None = None,
+) -> list[str]:
     """Return every failure found (empty list means valid). `full_dataset=False` skips the
     golden-value checks, which assume specific historical seasons (Ruth's 1927, Bonds' 2001,
     Larsen's 1956 World Series game) are present — true for the full build, not for a single-
-    or few-season partial one (e.g. a dry run against one season's zip)."""
+    or few-season partial one (e.g. a dry run against one season's zip). `progress`, if given,
+    is called repeatedly through the slower checks — confirmed real: validating the full
+    history (~30M rows) is slow enough on a constrained CI runner that a step silent through
+    this one call got cancelled by the platform for producing no output."""
     structure = _structure(tables)
+    if progress:
+        progress("structure: checked")
     if structure:
         return structure
-    return [
-        *_keys(tables),
-        *_referential(tables),
-        *_logic(tables),
-        *(_golden(tables) if full_dataset else []),
-        *_coverage(tables),
-    ]
+    keys = _keys(tables, progress=progress)
+    referential = _referential(tables, progress=progress)
+    logic = _logic(tables)
+    if progress:
+        progress("logic: checked")
+    golden = _golden(tables) if full_dataset else []
+    if progress:
+        progress("golden: checked")
+    coverage = _coverage(tables)
+    if progress:
+        progress("coverage: checked")
+    return [*keys, *referential, *logic, *golden, *coverage]
