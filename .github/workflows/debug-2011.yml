@@ -9,62 +9,50 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements.txt
-      - name: Isolate season 2011
+      - name: Replicate the accumulation pattern up through 2015
         run: |
           python - <<'PYEOF'
-          import re
-          import sys
           import time
           from pathlib import Path
 
-          import polars as pl
-
-          from pipelines.core.convert import dedupe_most_complete, read_tables
+          from pipelines.core.convert import dedupe_most_complete
           from pipelines.core.download import download
           from pipelines.core.http import new_session
           from pipelines.retrosheet import RETROSHEET
-          from pipelines.retrosheet.schema import (
-              CSV_DTYPES,
-              CSV_PRIMARY_KEYS,
-              NATIVE_SEASON_TABLES,
-              PRIMARY_KEYS,
-              SEASON_COLUMN,
-          )
-          from pipelines.retrosheet.seasons import season_zip_url
+          from pipelines.retrosheet.convert import read_season
+          from pipelines.retrosheet.schema import PRIMARY_KEYS
+          from pipelines.retrosheet.seasons import discover_seasons, season_zip_url
 
           def p(msg):
               print(msg, flush=True)
 
+          def vm_rss_mb():
+              with open("/proc/self/status") as f:
+                  for line in f:
+                      if line.startswith("VmRSS:"):
+                          return int(line.split()[1]) / 1024
+              return -1.0
+
           session = new_session()
-          p("downloading 2011...")
-          t0 = time.time()
-          zip_path = download(
-              (season_zip_url("2011"),), Path("2011.zip"), session=session, user_agent="debug"
-          )
-          p(f"downloaded in {time.time() - t0:.1f}s")
+          all_seasons = discover_seasons(session)
+          seasons = [s for s in all_seasons if int(s) <= 2015]
+          p(f"replicating accumulation for {len(seasons)} seasons, 1897..2015")
 
-          year_prefix = re.compile(r"^\d{4}")
-          p("calling read_tables...")
-          t0 = time.time()
-          tables = read_tables(
-              zip_path, RETROSHEET, CSV_DTYPES, CSV_PRIMARY_KEYS,
-              normalize_member_name=lambda n: year_prefix.sub("", n),
-              date_format="%Y%m%d", null_markers=frozenset({"", "?"}), allow_missing_columns=True,
-          )
-          p(f"read_tables done in {time.time() - t0:.1f}s")
-          for name, df in tables.items():
-              p(f"  {name}: {df.height} rows, {len(df.columns)} cols")
-
-          for name, df in tables.items():
+          fresh_by_table = {}
+          t_all = time.time()
+          for i, season in enumerate(seasons):
               t0 = time.time()
-              stamped = (
-                  df if name in NATIVE_SEASON_TABLES
-                  else df.with_columns(pl.lit(2011).cast(pl.Int16).alias(SEASON_COLUMN))
-              )
-              p(f"stamped {name} in {time.time() - t0:.2f}s")
-              t0 = time.time()
-              deduped = dedupe_most_complete(stamped, PRIMARY_KEYS[name])
-              p(f"deduped {name} in {time.time() - t0:.2f}s (height={deduped.height})")
+              zip_path = Path(f"{season}.zip")
+              if not zip_path.exists():
+                  download((season_zip_url(season),), zip_path, session=session, user_agent="debug")
+              for name, df in read_season(zip_path, season).items():
+                  fresh_by_table.setdefault(name, {})[season] = df
+              zip_path.unlink()
+              dt = time.time() - t0
+              rss = vm_rss_mb()
+              p(f"{i + 1}/{len(seasons)} season {season}: {dt:.2f}s, VmRSS={rss:.0f}MB, total={time.time() - t_all:.1f}s")
+              if dt > 10:
+                  p(f"  !!! SLOW: season {season} took {dt:.2f}s")
 
           p("ALL DONE")
           PYEOF
