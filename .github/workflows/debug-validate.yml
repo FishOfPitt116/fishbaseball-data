@@ -70,10 +70,10 @@ jobs:
           p("unpartitioned tables concatenated")
           for table, entries in partitioned_entries.items():
               t0 = time.time()
-              season_scoped[table] = pl.concat(
-                  [pl.read_parquet(parquet_dir / e["file"]) for e in entries.values()]
+              season_scoped[table] = pl.read_parquet(
+                  [parquet_dir / e["file"] for e in entries.values()]
               )
-              p(f"{table} read back + concatenated in {time.time() - t0:.1f}s, height={season_scoped[table].height}")
+              p(f"{table} read back in {time.time() - t0:.1f}s, height={season_scoped[table].height}")
 
           p("calling validate()...")
           t0 = time.time()
