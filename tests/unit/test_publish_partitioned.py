@@ -10,7 +10,7 @@ import polars as pl
 import pytest
 
 from pipelines.core.config import SourceConfig
-from pipelines.core.partition_manifest import build_partitioned_manifest
+from pipelines.core.partition_manifest import build_partition_entry, build_partitioned_manifest
 from pipelines.core.publish import make_notice, publish
 from tests.unit.test_publish import FakeClient
 
@@ -47,13 +47,32 @@ def game_info_df(seasons: list[int]) -> pl.DataFrame:
 
 
 def manifest_for(tag, fresh, unpartitioned, parquet_dir, previous=None):
+    # `build_partitioned_manifest` takes already-built entries, not DataFrames — the real
+    # orchestrator (`stage_build`) writes each season's Parquet and builds its entry as soon
+    # as that season is converted, discarding the DataFrame immediately, rather than holding
+    # every season's DataFrame in memory for the whole run. Mimic that here.
+    fresh_entries = {
+        table: {
+            season: build_partition_entry(
+                table,
+                season,
+                df,
+                repo=REPO,
+                tag=tag,
+                primary_key=PRIMARY_KEYS[table],
+                parquet_dir=parquet_dir,
+            )  # fmt: skip
+            for season, df in seasons.items()
+        }
+        for table, seasons in fresh.items()
+    }
     return build_partitioned_manifest(
         CONFIG,
         tag=tag,
         repo=REPO,
         upstream=UPSTREAM,
         unpartitioned_tables=unpartitioned,
-        partitioned_tables_fresh=fresh,
+        partitioned_tables_fresh=fresh_entries,
         parquet_dir=parquet_dir,
         primary_keys=PRIMARY_KEYS,
         season_columns=SEASON_COLUMNS,

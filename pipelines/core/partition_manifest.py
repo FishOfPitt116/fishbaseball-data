@@ -6,6 +6,12 @@ pointing at whichever older release still holds that file, rather than being re-
 `build_partitioned_manifest` reuses `build_manifest` unchanged for the single-file tables
 (so Lahman's own manifest building is untouched), and adds the partitioned-table entries and
 their `changes` tracking alongside.
+
+Partitioned tables take already-built entries (see `build_partition_entry`), not DataFrames:
+the caller writes each season's Parquet and builds its entry as soon as that season is
+converted, discarding the DataFrame immediately, rather than holding every season's DataFrame
+in memory for the whole run — confirmed real: for Retrosheet's ~129-season history, that held
+15+ GB and thrashed a CI runner into what looked like an indefinite hang.
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _build_partition_entry(
+def build_partition_entry(
     table: str,
     season: str,
     df: pl.DataFrame,
@@ -40,6 +46,11 @@ def _build_partition_entry(
     primary_key: Sequence[str],
     parquet_dir: Path,
 ) -> dict[str, Any]:
+    """Write one season's Parquet and return its manifest entry. Public so the orchestrator
+    (`stage_build`) can call this directly, per season, as soon as that season is converted —
+    and let the DataFrame go out of scope immediately — rather than holding every season's
+    DataFrame in memory for the whole run (confirmed real: that held 15+ GB and thrashed a CI
+    runner converting the full ~129-season Retrosheet history)."""
     file = f"{table}_{season}.parquet"
     path = parquet_dir / file
     write_parquet(df, path)
@@ -56,23 +67,18 @@ def _build_partition_entry(
 def _build_partitioned_table_entry(
     table: str,
     *,
-    fresh: Mapping[str, pl.DataFrame],
+    fresh_entries: Mapping[str, Mapping[str, Any]],
     previous_entry: Mapping[str, Any] | None,
-    repo: str,
-    tag: str,
     primary_key: Sequence[str],
-    parquet_dir: Path,
     dtypes: Mapping[str, pl.DataType],
     season_column: str,
 ) -> dict[str, Any]:
     partitions: dict[str, Any] = {}
     for season, entry in (previous_entry or {}).get("partitions", {}).items():
-        if season not in fresh:
+        if season not in fresh_entries:
             partitions[season] = dict(entry)  # untouched: still points at its own old release
-    for season, df in fresh.items():
-        partitions[season] = _build_partition_entry(
-            table, season, df, repo=repo, tag=tag, primary_key=primary_key, parquet_dir=parquet_dir
-        )
+    for season, entry in fresh_entries.items():
+        partitions[season] = dict(entry)
     seasons = sorted(int(s) for s in partitions)
     return {
         "partitioned": True,
@@ -89,7 +95,7 @@ def _build_partitioned_table_entry(
 def _compute_partitioned_changes(
     previous: Mapping[str, Any] | None,
     new_tables: Mapping[str, Mapping[str, Any]],
-    partitioned_fresh: Mapping[str, Mapping[str, pl.DataFrame]],
+    partitioned_fresh: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     if previous is None:
         return {
@@ -139,7 +145,7 @@ def build_partitioned_manifest(
     repo: str,
     upstream: Mapping[str, Any],
     unpartitioned_tables: Mapping[str, pl.DataFrame],
-    partitioned_tables_fresh: Mapping[str, Mapping[str, pl.DataFrame]],
+    partitioned_tables_fresh: Mapping[str, Mapping[str, Mapping[str, Any]]],
     parquet_dir: Path,
     primary_keys: Mapping[str, Sequence[str]],
     season_columns: Mapping[str, str],
@@ -166,16 +172,13 @@ def build_partitioned_manifest(
         built_at=built_at,
         previous=previous,
     )
-    for table, fresh in partitioned_tables_fresh.items():
+    for table, fresh_entries in partitioned_tables_fresh.items():
         prev_entry = (previous or {}).get("tables", {}).get(table)
         manifest["tables"][table] = _build_partitioned_table_entry(
             table,
-            fresh=fresh,
+            fresh_entries=fresh_entries,
             previous_entry=prev_entry,
-            repo=repo,
-            tag=tag,
             primary_key=primary_keys[table],
-            parquet_dir=parquet_dir,
             dtypes=dtypes[table],
             season_column=season_columns[table],
         )

@@ -26,7 +26,7 @@ import polars as pl
 
 from pipelines.core.config import SourceConfig, SourceSchema
 from pipelines.core.detect import USER_AGENT, fetch_latest
-from pipelines.core.partition_manifest import build_partitioned_manifest
+from pipelines.core.partition_manifest import build_partition_entry, build_partitioned_manifest
 from pipelines.core.partitions import check_all_partitions, decide_partitions, download_partition
 from pipelines.core.pipeline import StageError, fetch_previous_manifest, latest_url, write_json
 from pipelines.core.publish import ReleaseClient, make_notice, publish, record_upstream_seen
@@ -143,14 +143,32 @@ def stage_build(
         previous_latest = fetch_latest(latest_url(config, repo), session)
         previous = fetch_previous_manifest(repo, previous_latest, session)
         changed_seasons: list[str] = found["changed_seasons"]
+        parquet_dir = out_dir / "tables"
 
-        fresh_by_table: dict[str, dict[str, pl.DataFrame]] = {}
+        # `tag` is needed up front (not just after the loop, as before) so each partitioned
+        # table's season can be written and discarded as soon as it's converted, instead of
+        # every season's DataFrame being held in memory for the whole run — confirmed real:
+        # for Retrosheet's full ~129-season history, that held 15+ GB and thrashed a CI
+        # runner into what looked like an indefinite hang.
+        existing = client.existing_tags() if client is not None else []
+        tag = next_tag(config.name, now.date(), existing)
+
+        partitioned_names = config.partitions.partitioned_tables
+        partitioned_entries: dict[str, dict[str, dict[str, Any]]] = {}
+        unpartitioned_by_table: dict[str, dict[str, pl.DataFrame]] = {}
         for season in changed_seasons:
             if progress:
                 progress(f"converting {season}...")
             zip_path = Path(found["zip_paths"][season])
             for name, df in config.partitions.convert(zip_path, season).items():
-                fresh_by_table.setdefault(name, {})[season] = df
+                if name in partitioned_names:
+                    entry = build_partition_entry(
+                        name, season, df, repo=repo, tag=tag,
+                        primary_key=schema.primary_keys[name], parquet_dir=parquet_dir,
+                    )  # fmt: skip
+                    partitioned_entries.setdefault(name, {})[season] = entry
+                else:
+                    unpartitioned_by_table.setdefault(name, {})[season] = df
             if progress:
                 progress(f"converted {season}")
 
@@ -159,39 +177,41 @@ def stage_build(
         # forward row was already validated when it was first built.
         if changed_seasons:
             if progress:
-                progress("concatenating converted seasons")
-            season_scoped = {
-                name: pl.concat(list(d.values())) for name, d in fresh_by_table.items()
+                progress("validating converted seasons")
+            season_scoped: dict[str, pl.DataFrame] = {
+                name: pl.concat(list(d.values())) for name, d in unpartitioned_by_table.items()
             }
+            for table, entries in partitioned_entries.items():
+                season_scoped[table] = pl.concat(
+                    [pl.read_parquet(parquet_dir / e["file"]) for e in entries.values()]
+                )
             failures = schema.validate(
                 season_scoped, full_dataset=previous is None, progress=progress
             )
             if failures:
                 raise ValidationError(failures)
+            del season_scoped  # the single biggest allocation this run; free it right away
 
-        partitioned_names = config.partitions.partitioned_tables
-        partitioned_fresh = {t: fresh_by_table.get(t, {}) for t in partitioned_names}
         unpartitioned_tables = {
             name: _assemble_unpartitioned(
                 name,
-                fresh_by_table.get(name, {}),
+                unpartitioned_by_table.get(name, {}),
                 previous=previous,
                 changed_seasons=changed_seasons,
                 season_column=schema.year_columns[name],
                 session=session,
             )  # fmt: skip
-            for name in sorted(set(fresh_by_table) - partitioned_names)
+            for name in sorted(unpartitioned_by_table)
         }
 
-        existing = client.existing_tags() if client is not None else []
-        tag = next_tag(config.name, now.date(), existing)
         upstream = {"version": now.date().isoformat(), "page_url": config.page_url}
         if progress:
-            progress(f"writing manifest for {len(fresh_by_table)} table(s)")
+            n_tables = len(unpartitioned_tables) + len(partitioned_entries)
+            progress(f"writing manifest for {n_tables} table(s)")
         manifest = build_partitioned_manifest(
             config, tag=tag, repo=repo, upstream=upstream,
-            unpartitioned_tables=unpartitioned_tables, partitioned_tables_fresh=partitioned_fresh,
-            parquet_dir=out_dir / "tables", primary_keys=schema.primary_keys,
+            unpartitioned_tables=unpartitioned_tables, partitioned_tables_fresh=partitioned_entries,
+            parquet_dir=parquet_dir, primary_keys=schema.primary_keys,
             season_columns=schema.year_columns, dtypes=schema.dtypes, schema_version=schema.version,
             pipeline_version=pipeline_version, built_at=now, previous=previous,
         )  # fmt: skip

@@ -263,3 +263,37 @@ def test_stage_build_reports_progress_before_and_after_each_season(
         before = next(i for i, m in enumerate(seen) if "converting" in m and season in m)
         after = next(i for i, m in enumerate(seen) if m == f"converted {season}")
         assert before < after
+
+
+def test_stage_build_writes_each_seasons_parquet_before_the_loop_moves_on(
+    tmp_path: Path, retrosheet_season_zips: dict[int, Path]
+):
+    # Confirmed real: holding every season's DataFrame in memory for the whole run (instead
+    # of writing each one's Parquet immediately and letting it go) reached 15+ GB and
+    # thrashed a CI runner converting the full ~129-season history. A partitioned table's
+    # file for a season must exist on disk as soon as that season's "converted" line fires —
+    # not only once the whole loop (and everything after it) finishes.
+    found = {
+        "changed_seasons": ["1927", "1956", "2001"],
+        "reason": "first_release",
+        "zip_paths": {
+            "1927": str(retrosheet_season_zips[1927]),
+            "1956": str(retrosheet_season_zips[1956]),
+            "2001": str(retrosheet_season_zips[2001]),
+        },
+    }
+    session = RetrosheetSession({}, FakeClient(), {})  # fetch_latest 404s: no previous release
+    out_dir = tmp_path / "b"
+    seen_at_checkpoint: dict[str, bool] = {}
+
+    def progress(msg: str) -> None:
+        if msg.startswith("converted "):
+            season = msg.removeprefix("converted ")
+            seen_at_checkpoint[season] = (out_dir / "tables" / f"plays_{season}.parquet").exists()
+
+    stage_build(
+        RETROSHEET, RETROSHEET_SCHEMA, out_dir=out_dir, repo=REPO, session=session,
+        client=None, found=found, now=NOW, pipeline_version="0.1.0", progress=progress,
+    )  # fmt: skip
+
+    assert seen_at_checkpoint == {"1927": True, "1956": True, "2001": True}

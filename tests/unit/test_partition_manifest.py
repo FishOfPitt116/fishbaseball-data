@@ -8,7 +8,7 @@ import polars as pl
 import pytest
 
 from pipelines.core.manifest import release_url
-from pipelines.core.partition_manifest import build_partitioned_manifest
+from pipelines.core.partition_manifest import build_partition_entry, build_partitioned_manifest
 
 REPO = "FishOfPitt116/fishbaseball-data"
 TAG = "retrosheet-2026-10-05"
@@ -56,13 +56,34 @@ def build(
     parquet_dir,
     previous=None,
 ):
+    # `build_partitioned_manifest` takes already-built partition entries, not DataFrames —
+    # the caller (real orchestration: `stage_build`) writes each season's Parquet and builds
+    # its entry as soon as that season is converted, discarding the DataFrame immediately,
+    # rather than holding every season's DataFrame in memory for the whole run (confirmed
+    # real: that held 15+ GB and thrashed a CI runner converting the full ~129-season
+    # history). Mimic that here instead of passing DataFrames straight through.
+    fresh_entries = {
+        table: {
+            season: build_partition_entry(
+                table,
+                season,
+                df,
+                repo=REPO,
+                tag=tag,
+                primary_key=PRIMARY_KEYS[table],
+                parquet_dir=parquet_dir,
+            )  # fmt: skip
+            for season, df in seasons.items()
+        }
+        for table, seasons in fresh_partitions.items()
+    }
     return build_partitioned_manifest(
         Config(),
         tag=tag,
         repo=REPO,
         upstream=UPSTREAM,
         unpartitioned_tables=unpartitioned,
-        partitioned_tables_fresh=fresh_partitions,
+        partitioned_tables_fresh=fresh_entries,
         parquet_dir=parquet_dir,
         primary_keys=PRIMARY_KEYS,
         season_columns=SEASON_COLUMNS,
