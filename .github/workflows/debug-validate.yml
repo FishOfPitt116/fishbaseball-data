@@ -1,0 +1,83 @@
+name: debug-validate
+on:
+  workflow_dispatch:
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: pip install -r requirements.txt
+      - name: Replicate convert-all-seasons then validate, with memory tracking
+        run: |
+          python - <<'PYEOF'
+          import time
+          from pathlib import Path
+
+          import polars as pl
+
+          from pipelines.core.download import download
+          from pipelines.core.http import new_session
+          from pipelines.core.partition_manifest import build_partition_entry
+          from pipelines.retrosheet import RETROSHEET, RETROSHEET_SCHEMA
+          from pipelines.retrosheet.convert import read_season
+          from pipelines.retrosheet.schema import PRIMARY_KEYS
+          from pipelines.retrosheet.seasons import discover_seasons, season_zip_url
+
+          def vm_rss_mb():
+              with open("/proc/self/status") as f:
+                  for line in f:
+                      if line.startswith("VmRSS:"):
+                          return int(line.split()[1]) / 1024
+              return -1.0
+
+          def p(msg):
+              print(f"{msg}  VmRSS={vm_rss_mb():.0f}MB", flush=True)
+
+          session = new_session()
+          seasons = discover_seasons(session)
+          p(f"discovered {len(seasons)} seasons")
+
+          parquet_dir = Path("tables")
+          parquet_dir.mkdir(exist_ok=True)
+          partitioned_names = RETROSHEET.partitions.partitioned_tables
+          partitioned_entries = {}
+          unpartitioned_by_table = {}
+
+          t_all = time.time()
+          for i, season in enumerate(seasons):
+              zip_path = Path(f"{season}.zip")
+              if not zip_path.exists():
+                  download((season_zip_url(season),), zip_path, session=session, user_agent="debug")
+              for name, df in read_season(zip_path, season).items():
+                  if name in partitioned_names:
+                      entry = build_partition_entry(
+                          name, season, df, repo="x/y", tag="debug",
+                          primary_key=PRIMARY_KEYS[name], parquet_dir=parquet_dir,
+                      )
+                      partitioned_entries.setdefault(name, {})[season] = entry
+                  else:
+                      unpartitioned_by_table.setdefault(name, {})[season] = df
+              zip_path.unlink()
+              if (i + 1) % 20 == 0 or i == len(seasons) - 1:
+                  p(f"{i + 1}/{len(seasons)} converted, total={time.time() - t_all:.1f}s")
+
+          p("all seasons converted; building season_scoped for validate")
+          season_scoped = {
+              name: pl.concat(list(d.values())) for name, d in unpartitioned_by_table.items()
+          }
+          p("unpartitioned tables concatenated")
+          for table, entries in partitioned_entries.items():
+              t0 = time.time()
+              season_scoped[table] = pl.concat(
+                  [pl.read_parquet(parquet_dir / e["file"]) for e in entries.values()]
+              )
+              p(f"{table} read back + concatenated in {time.time() - t0:.1f}s, height={season_scoped[table].height}")
+
+          p("calling validate()...")
+          t0 = time.time()
+          failures = RETROSHEET_SCHEMA.validate(season_scoped, full_dataset=True, progress=p)
+          p(f"validate() done in {time.time() - t0:.1f}s, failures={len(failures)}")
+          p("ALL DONE")
+          PYEOF
