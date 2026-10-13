@@ -9,18 +9,17 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12", cache: pip}
       - run: pip install -r requirements.txt
-      - name: Replicate the accumulation pattern up through 2015
+      - name: Replicate the write-as-you-go pattern up through 2015
         run: |
           python - <<'PYEOF'
           import time
           from pathlib import Path
 
-          from pipelines.core.convert import dedupe_most_complete
           from pipelines.core.download import download
           from pipelines.core.http import new_session
+          from pipelines.core.partition_manifest import build_partition_entry
           from pipelines.retrosheet import RETROSHEET
           from pipelines.retrosheet.convert import read_season
-          from pipelines.retrosheet.schema import PRIMARY_KEYS
           from pipelines.retrosheet.seasons import discover_seasons, season_zip_url
 
           def p(msg):
@@ -36,9 +35,11 @@ jobs:
           session = new_session()
           all_seasons = discover_seasons(session)
           seasons = [s for s in all_seasons if int(s) <= 2015]
-          p(f"replicating accumulation for {len(seasons)} seasons, 1897..2015")
+          p(f"replicating the fixed write-as-you-go pattern for {len(seasons)} seasons, 1897..2015")
 
-          fresh_by_table = {}
+          parquet_dir = Path("tables")
+          parquet_dir.mkdir(exist_ok=True)
+          partitioned_names = RETROSHEET.partitions.partitioned_tables
           t_all = time.time()
           for i, season in enumerate(seasons):
               t0 = time.time()
@@ -46,7 +47,13 @@ jobs:
               if not zip_path.exists():
                   download((season_zip_url(season),), zip_path, session=session, user_agent="debug")
               for name, df in read_season(zip_path, season).items():
-                  fresh_by_table.setdefault(name, {})[season] = df
+                  if name in partitioned_names:
+                      build_partition_entry(
+                          name, season, df, repo="x/y", tag="debug",
+                          primary_key=["gid"], parquet_dir=parquet_dir,
+                      )
+                  # unpartitioned tables (game_info/all_players) are small; not the subject
+                  # of this diagnostic, so just let them go without even writing them.
               zip_path.unlink()
               dt = time.time() - t0
               rss = vm_rss_mb()
