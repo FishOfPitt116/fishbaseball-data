@@ -182,9 +182,16 @@ def stage_build(
                 name: pl.concat(list(d.values())) for name, d in unpartitioned_by_table.items()
             }
             for table, entries in partitioned_entries.items():
-                season_scoped[table] = pl.concat(
-                    [pl.read_parquet(parquet_dir / e["file"]) for e in entries.values()]
+                # One multi-file read, not `pl.concat([pl.read_parquet(f) for f in files])` —
+                # confirmed real: building that Python list first holds every season's
+                # DataFrame individually alongside the table polars is concatenating them
+                # into, and for `plays` (17M rows, ~180 columns) that doubling was enough to
+                # get a CI runner OOM-killed seconds after the smaller tables read back fine.
+                season_scoped[table] = pl.read_parquet(
+                    [parquet_dir / e["file"] for e in entries.values()]
                 )
+                if progress:
+                    progress(f"read back {table} ({season_scoped[table].height} rows)")
             failures = schema.validate(
                 season_scoped, full_dataset=previous is None, progress=progress
             )
